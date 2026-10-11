@@ -1,0 +1,9 @@
+# Only the GUI sources are versioned; the TrustTunnel client binaries come from its release archive.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/gui/
+
+gui/*.exe
+gui/*.pdb
