@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0-3972AA" alt="version">
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows" alt="Windows 10 | 11">
-  <img src="https://img.shields.io/badge/.NET%20Framework-4.8-512BD4" alt=".NET Framework 4.8">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="Apache-2.0">
-  <img src="https://img.shields.io/badge/status-unofficial-F08400" alt="unofficial">
+  <img src="docs/badges/version.svg" alt="version 1.1.0">
+  <img src="docs/badges/windows.svg" alt="Windows 10 | 11">
+  <img src="docs/badges/dotnet.svg" alt=".NET Framework 4.8">
+  <img src="docs/badges/license.svg" alt="license Apache-2.0">
+  <img src="docs/badges/status.svg" alt="status unofficial">
 </p>
 
 <p align="center">
