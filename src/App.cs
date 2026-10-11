@@ -291,6 +291,11 @@ namespace TrustTunnelGui
         {
             Store.Data.Settings.SelectedServerId = server.Id;
             Store.Save();
+            if (Store.Data.Settings.SocksAdapterMissing)
+            {
+                OnVpnFailed(L.AdapterUnavailable);
+                return;
+            }
             // TUN needs an elevated client; SOCKS mode works with normal rights.
             if (!Store.Data.Settings.IsSocks && !IsElevated)
             {

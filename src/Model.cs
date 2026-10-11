@@ -91,7 +91,26 @@ namespace TrustTunnelGui
         public bool IsSocks { get { return ListenerMode == "socks"; } }
 
         [ScriptIgnore]
-        public string SocksAddress { get { return (SocksAllowLan ? "0.0.0.0" : "127.0.0.1") + ":" + SocksPort; } }
+        public string SocksAddress
+        {
+            get
+            {
+                if (!SocksAllowLan) return "127.0.0.1:" + SocksPort;
+                if (string.IsNullOrEmpty(SocksAdapterId)) return "0.0.0.0:" + SocksPort;
+                // A chosen adapter that is gone must not silently widen access to every interface.
+                return (Net.AdapterIp(SocksAdapterId) ?? "127.0.0.1") + ":" + SocksPort;
+            }
+        }
+
+        // LAN access bound to one adapter (empty = all adapters). The IP is resolved on every connection.
+        public string SocksAdapterId = "";
+        public string SocksAdapterName = "";
+
+        [ScriptIgnore]
+        public bool SocksAdapterMissing
+        {
+            get { return IsSocks && SocksAllowLan && !string.IsNullOrEmpty(SocksAdapterId) && Net.AdapterIp(SocksAdapterId) == null; }
+        }
         public List<string> ExcludedRoutes = new List<string>(Defaults.ExcludedRoutes);
     }
 

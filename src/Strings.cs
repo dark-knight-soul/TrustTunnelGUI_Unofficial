@@ -146,6 +146,13 @@ namespace TrustTunnelGui
         public static string SocksAuthHelper = "Необязательно. Если не указаны, прокси работает без аутентификации";
         public static string SocksAuthPair = "Укажите и имя пользователя, и пароль";
         public static string SocksLanNoAuth = "Без пароля прокси сможет использовать любое устройство в сети";
+        public static string SocksAdapter = "Сетевой адаптер";
+        public static string SocksAdapterAll = "Все адаптеры";
+        public static string SocksAdapterAllHint = "Прокси принимает подключения на всех сетевых адаптерах";
+        public static string SocksAdapterHint = "Прокси принимает подключения только через выбранный адаптер";
+        public static string AdapterUnavailableItem = "{0} (недоступен)";
+        public static string AdapterUnavailable = "Выбранный сетевой адаптер отключён или не получил IPv4-адрес. Подключите его или выберите другой в настройках режима подключения";
+        public static string RefreshAdapters = "Обновить список адаптеров";
         public static string ProxyBanner = "Режим прокси: SOCKS5 {0}";
         public static string ProxyBannerLan = "В локальной сети: {0}";
         public static string AddressCopied = "Адрес скопирован";
@@ -261,6 +268,12 @@ namespace TrustTunnelGui
             { "SocksAuthHelper", "Optional. Without them the proxy accepts connections without authentication" },
             { "SocksAuthPair", "Set both username and password" },
             { "SocksLanNoAuth", "Without a password any device on the network can use the proxy" },
+            { "SocksAdapter", "Network adapter" }, { "SocksAdapterAll", "All adapters" },
+            { "SocksAdapterAllHint", "The proxy accepts connections on every network adapter" },
+            { "SocksAdapterHint", "The proxy accepts connections only through the selected adapter" },
+            { "AdapterUnavailableItem", "{0} (unavailable)" },
+            { "AdapterUnavailable", "The selected network adapter is disconnected or has no IPv4 address. Connect it or choose another one in the connection mode settings" },
+            { "RefreshAdapters", "Refresh adapter list" },
             { "ProxyBanner", "Proxy mode: SOCKS5 {0}" }, { "ProxyBannerLan", "On local network: {0}" },
             { "AddressCopied", "Address copied" }, { "CopyAddress", "Copy address" },
             { "AdminRequired", "Administrator rights required" },

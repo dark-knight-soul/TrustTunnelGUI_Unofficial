@@ -87,6 +87,23 @@ namespace TrustTunnelGui
             local.Password = "pass";
             File.WriteAllText(Path.Combine(outDir, "built_socks.toml"), ConfigBuilder.Build(local, profile, socksSettings), new UTF8Encoding(false));
 
+            // LAN adapter binding.
+            foreach (var a in Net.Adapters()) sb.AppendLine("adapter: " + a.Label + " virtual=" + a.IsVirtual + " id=" + a.Id);
+            var lan = new AppSettings { ListenerMode = "socks", SocksPort = 1080 };
+            sb.AppendLine("lan off: " + lan.SocksAddress);
+            lan.SocksAllowLan = true;
+            sb.AppendLine("lan all: " + lan.SocksAddress + " hint=" + string.Join(",", Net.ProxyLanAddresses(lan)));
+            var first = Net.Adapters().FirstOrDefault();
+            if (first != null)
+            {
+                lan.SocksAdapterId = first.Id;
+                sb.AppendLine("lan adapter: " + lan.SocksAddress + " missing=" + lan.SocksAdapterMissing + " hint=" + string.Join(",", Net.ProxyLanAddresses(lan)));
+                var adapterCfg = ConfigBuilder.Build(local, profile, lan);
+                sb.AppendLine("config: " + adapterCfg.Split('\n').First(l => l.StartsWith("address =")).Trim());
+            }
+            lan.SocksAdapterId = "{00000000-0000-0000-0000-000000000000}";
+            sb.AppendLine("lan gone adapter: " + lan.SocksAddress + " missing=" + lan.SocksAdapterMissing);
+
             var back = ServerImport.FromClientConfig(cfg);
             sb.AppendLine("roundtrip: address=" + back.Address + " pass=" + back.Password + " proto=" + back.Protocol + " cr=" + back.ClientRandom + " cert=" + back.Certificate.Replace("\n", "\\n"));
             sb.AppendLine("valid addr: " + string.Join(",", new[] { "1.2.3.4", "1.2.3.4:443", "vpn.example.com", "vpn.example.com:8443", "::1", "[::1]:443", "bad host", "1.2.3.4:99999" }.Select(a => a + "=" + Validation.IsAddress(a))));
@@ -234,6 +251,18 @@ namespace TrustTunnelGui
                 s.SocksAllowLan = true;
                 w.SelectTab(2);
                 w.Push(new ConnectionModePage(w));
+            }));
+            steps.Add(Step("24b_connection_mode_adapter", delegate
+            {
+                var s = app.Store.Data.Settings;
+                var adapter = Net.Adapters().FirstOrDefault(a => !a.IsVirtual) ?? Net.Adapters().FirstOrDefault();
+                if (adapter != null) { s.SocksAdapterId = adapter.Id; s.SocksAdapterName = adapter.Name; }
+                s.SocksUsername = "user";
+                s.SocksPassword = "secret";
+                w.SelectTab(2);
+                w.Push(new ConnectionModePage(w));
+                var sv = Find<System.Windows.Controls.ScrollViewer>(w.TopPage);
+                if (sv != null) sv.ScrollToVerticalOffset(250);
             }));
             steps.Add(Step("25_servers_socks_banner", delegate { SetVpnState(app.Vpn, VpnState.Connected, app.Store.Data.Servers[0].Id); w.SelectTab(0); }));
             steps.Add(Step("26_admin_dialog", delegate { app.Store.Data.Settings.ListenerMode = "tun"; app.Store.Data.Settings.SocksAllowLan = false; SetVpnState(app.Vpn, VpnState.Disconnected, null); w.SelectTab(0); w.ShowDialog(L.AdminRequired, UI.BodyMedium(L.AdminRequiredDescription), DialogAction.Cancel(), new DialogAction(L.Restart, delegate { return true; })); }));

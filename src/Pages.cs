@@ -84,8 +84,9 @@ namespace TrustTunnelGui
             texts.Children.Add(UI.TitleSmall(string.Format(L.ProxyBanner, local)));
             if (s.SocksAllowLan)
             {
-                var ips = Net.LocalAddresses().Select(ip => ip + ":" + s.SocksPort).ToList();
-                if (ips.Count > 0) texts.Children.Add(UI.BodyMedium(string.Format(L.ProxyBannerLan, string.Join(", ", ips)), C.NeutralDark));
+                var ips = Net.ProxyLanAddresses(s);
+                if (s.SocksAdapterMissing) texts.Children.Add(UI.BodyMedium(L.AdapterUnavailable, C.Error));
+                else if (ips.Count > 0) texts.Children.Add(UI.BodyMedium(string.Format(L.ProxyBannerLan, string.Join(", ", ips)), C.NeutralDark));
             }
             Grid.SetColumn(texts, 1);
             grid.Children.Add(texts);
@@ -1017,7 +1018,10 @@ namespace TrustTunnelGui
         readonly FormField _username = new FormField(L.Username, L.UsernameHint, L.SocksAuthHelper);
         readonly FormField _password = new FormField(L.Password, L.PasswordHint, null, 1, true);
         readonly TextBlock _lanInfo = UI.BodyMedium("", C.NeutralDark);
+        readonly DropdownField _adapter = new DropdownField(L.SocksAdapter);
+        readonly FrameworkElement _adapterPanel;
         readonly Button _save;
+        List<NetAdapter> _adapters = new List<NetAdapter>();
         System.Windows.Controls.Primitives.ToggleButton _lan;
         string _initial;
 
@@ -1040,6 +1044,22 @@ namespace TrustTunnelGui
             form.Children.Add(_port);
             _socksPanel.Children.Add(UI.MaxWidthLeft(form, 640));
             _socksPanel.Children.Add(Tiles.Switch(L.SocksLan, L.SocksLanDescription, s.SocksAllowLan, delegate { Update(); }, out _lan));
+
+            // Which adapter the proxy listens on when LAN access is on.
+            var adapterForm = new StackPanel { Margin = new Thickness(16, 8, 16, 0) };
+            var adapterRow = new DockPanel();
+            var refresh = UI.IconButton(Icons.Update, L.RefreshAdapters, delegate { LoadAdapters(_adapter.SelectedKey); Update(); });
+            refresh.VerticalAlignment = VerticalAlignment.Bottom;
+            refresh.Margin = new Thickness(8, 0, 0, 21);
+            DockPanel.SetDock(refresh, Dock.Right);
+            adapterRow.Children.Add(refresh);
+            adapterRow.Children.Add(_adapter);
+            adapterForm.Children.Add(adapterRow);
+            _adapterPanel = UI.MaxWidthLeft(adapterForm, 640);
+            _socksPanel.Children.Add(_adapterPanel);
+            LoadAdapters(s.SocksAdapterId);
+            _adapter.Changed += Update;
+
             _lanInfo.Margin = new Thickness(16, 0, 16, 12);
             _socksPanel.Children.Add(_lanInfo);
             var auth = new StackPanel { Margin = new Thickness(16, 8, 16, 0) };
@@ -1062,9 +1082,25 @@ namespace TrustTunnelGui
             Update();
         }
 
+        // "All adapters" plus every active adapter; a saved adapter that is gone stays selectable and is marked unavailable.
+        void LoadAdapters(string selectedId)
+        {
+            _adapters = Net.Adapters();
+            var items = new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("", L.SocksAdapterAll) };
+            items.AddRange(_adapters.Select(a => new KeyValuePair<string, string>(a.Id, a.Label)));
+            var saved = App.I.Store.Data.Settings;
+            if (!string.IsNullOrEmpty(selectedId) && _adapters.All(a => a.Id != selectedId))
+            {
+                var name = selectedId == saved.SocksAdapterId && saved.SocksAdapterName.Length > 0 ? saved.SocksAdapterName : selectedId;
+                items.Add(new KeyValuePair<string, string>(selectedId, string.Format(L.AdapterUnavailableItem, name)));
+            }
+            _adapter.SetItems(items, selectedId ?? "");
+        }
+
         string Snapshot()
         {
-            return string.Join("\u0001", _socks.IsChecked == true ? "socks" : "tun", _port.Value, _lan != null && _lan.IsChecked == true ? "1" : "0", _username.Value, _password.Value);
+            return string.Join("\u0001", _socks.IsChecked == true ? "socks" : "tun", _port.Value, _lan != null && _lan.IsChecked == true ? "1" : "0",
+                _adapter.SelectedKey ?? "", _username.Value, _password.Value);
         }
 
         public override bool IsDirty { get { return Snapshot() != _initial; } }
@@ -1076,12 +1112,25 @@ namespace TrustTunnelGui
             _socksPanel.IsEnabled = socks;
             _socksPanel.Opacity = socks ? 1 : 0.5;
             bool lan = _lan.IsChecked == true;
+            _adapterPanel.Visibility = lan ? Visibility.Visible : Visibility.Collapsed;
             int port;
             var portText = int.TryParse(_port.Value.Trim(), out port) ? port.ToString() : "1080";
             if (lan)
             {
-                var ips = Net.LocalAddresses();
-                var text = string.Format(L.ProxyBannerLan, ips.Count > 0 ? string.Join(", ", ips.Select(ip => ip + ":" + portText)) : "0.0.0.0:" + portText);
+                string text;
+                var key = _adapter.SelectedKey ?? "";
+                if (key.Length == 0)
+                {
+                    var ips = _adapters.Where(a => !a.IsVirtual).Select(a => a.Ip + ":" + portText).ToList();
+                    text = string.Format(L.ProxyBannerLan, ips.Count > 0 ? string.Join(", ", ips) : "0.0.0.0:" + portText) + "\n" + L.SocksAdapterAllHint;
+                }
+                else
+                {
+                    var adapter = _adapters.FirstOrDefault(a => a.Id == key);
+                    text = adapter != null
+                        ? string.Format(L.ProxyBannerLan, adapter.Ip + ":" + portText) + "\n" + L.SocksAdapterHint
+                        : L.AdapterUnavailable;
+                }
                 if (_username.Value.Trim().Length == 0) text += "\n" + L.SocksLanNoAuth;
                 _lanInfo.Text = text;
                 _lanInfo.Visibility = Visibility.Visible;
@@ -1110,6 +1159,10 @@ namespace TrustTunnelGui
             s.ListenerMode = socks ? "socks" : "tun";
             if (portOk) s.SocksPort = port;
             s.SocksAllowLan = _lan.IsChecked == true;
+            var adapterId = _adapter.SelectedKey ?? "";
+            var adapter = _adapters.FirstOrDefault(a => a.Id == adapterId);
+            if (adapterId != s.SocksAdapterId || adapter != null) s.SocksAdapterName = adapter != null ? adapter.Name : "";
+            s.SocksAdapterId = adapterId;
             s.SocksUsername = user;
             s.SocksPassword = pass;
             App.I.Store.Save();
@@ -1120,12 +1173,23 @@ namespace TrustTunnelGui
         }
     }
 
+    class NetAdapter
+    {
+        public string Id;
+        public string Name;
+        public string Description;
+        public string Ip;
+        public bool IsVirtual;
+
+        public string Label { get { return Name + " — " + Ip; } }
+    }
+
     static class Net
     {
-        // IPv4 addresses of active physical/Wi-Fi adapters, for the "available on local network" hint.
-        public static List<string> LocalAddresses()
+        // Active adapters with an IPv4 address that can accept LAN connections (no loopback, tunnels or Wintun).
+        public static List<NetAdapter> Adapters()
         {
-            var result = new List<string>();
+            var result = new List<NetAdapter>();
             try
             {
                 foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
@@ -1133,15 +1197,39 @@ namespace TrustTunnelGui
                     if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
                     if (nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback ||
                         nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
-                    if (nic.Description.IndexOf("wintun", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                        nic.Description.IndexOf("virtual", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                    foreach (var a in nic.GetIPProperties().UnicastAddresses)
-                        if (a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !result.Contains(a.Address.ToString()))
-                            result.Add(a.Address.ToString());
+                    if (nic.Description.IndexOf("wintun", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    var ip = nic.GetIPProperties().UnicastAddresses
+                        .Select(a => a.Address)
+                        .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !a.ToString().StartsWith("169.254."));
+                    if (ip == null) continue;
+                    result.Add(new NetAdapter
+                    {
+                        Id = nic.Id,
+                        Name = nic.Name,
+                        Description = nic.Description,
+                        Ip = ip.ToString(),
+                        IsVirtual = nic.Description.IndexOf("virtual", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                    nic.Description.IndexOf("hyper-v", StringComparison.OrdinalIgnoreCase) >= 0
+                    });
                 }
             }
             catch { }
             return result;
+        }
+
+        public static string AdapterIp(string id)
+        {
+            var adapter = Adapters().FirstOrDefault(a => a.Id == id);
+            return adapter == null ? null : adapter.Ip;
+        }
+
+        // Addresses other devices can use to reach the proxy with the current settings.
+        public static List<string> ProxyLanAddresses(AppSettings s)
+        {
+            if (string.IsNullOrEmpty(s.SocksAdapterId))
+                return Adapters().Where(a => !a.IsVirtual).Select(a => a.Ip + ":" + s.SocksPort).ToList();
+            var ip = AdapterIp(s.SocksAdapterId);
+            return ip == null ? new List<string>() : new List<string> { ip + ":" + s.SocksPort };
         }
     }
 
