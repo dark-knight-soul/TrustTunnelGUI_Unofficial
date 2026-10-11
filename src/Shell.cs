@@ -666,7 +666,8 @@ namespace TrustTunnelGui
     static class Tiles
     {
         // CustomListTileSeparated: tappable title/subtitle, vertical divider, trailing widget.
-        public static FrameworkElement Separated(string title, string subtitle, Action tap, FrameworkElement trailing, bool titleSmall = true)
+        public static FrameworkElement Separated(string title, string subtitle, Action tap, FrameworkElement trailing, bool titleSmall = true,
+            string badge = null, Brush badgeBrush = null)
         {
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -684,6 +685,8 @@ namespace TrustTunnelGui
                 s.Margin = new Thickness(0, 2, 0, 0);
                 s.TextTrimming = TextTrimming.CharacterEllipsis;
                 s.TextWrapping = TextWrapping.NoWrap;
+                if (badge != null)
+                    s.Inlines.Add(new System.Windows.Documents.Run(badge) { Foreground = badgeBrush ?? C.NeutralLight });
                 texts.Children.Add(s);
             }
             var row = new Button { Style = UI.S("ListRow"), Content = texts, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };

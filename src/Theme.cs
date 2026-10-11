@@ -17,7 +17,7 @@ namespace TrustTunnelGui
             Background, Elevated, BackgroundAdditional, BackgroundSystem,
             NeutralLight, NeutralDark, NeutralBlack, NeutralBlend, Scrim, PowerOff,
             SnackBackground, SnackText, LogWarn, LogError, LogDebug, LogSelected,
-            SwitchOffTrack, SwitchOffThumb, Selection, OnAccent, NavHover, HoverCircle;
+            SwitchOffTrack, SwitchOffThumb, Selection, OnAccent, NavHover, HoverCircle, Success, Attention;
 
         public static readonly Palette Light = new Palette
         {
@@ -28,7 +28,7 @@ namespace TrustTunnelGui
             Scrim = "#66000000", PowerOff = "#74869C", SnackBackground = "#333E4C", SnackText = "#FFFFFF",
             LogWarn = "#C76300", LogError = "#D02C0B", LogDebug = "#74869C", LogSelected = "#334F8AC4",
             SwitchOffTrack = "#F6F7F9", SwitchOffThumb = "#74869C", Selection = "#4F8AC4", OnAccent = "#FFFFFF",
-            NavHover = "#14333E4C", HoverCircle = "#E6EAEF"
+            NavHover = "#14333E4C", HoverCircle = "#E6EAEF", Success = "#3E9B5A", Attention = "#D47500"
         };
 
         public static readonly Palette Dark = new Palette
@@ -40,7 +40,7 @@ namespace TrustTunnelGui
             Scrim = "#99000000", PowerOff = "#4E5B6B", SnackBackground = "#E3E8EE", SnackText = "#1D2127",
             LogWarn = "#F0A848", LogError = "#FF7B61", LogDebug = "#8797AB", LogSelected = "#554F8AC4",
             SwitchOffTrack = "#262B33", SwitchOffThumb = "#9AA8B8", Selection = "#4F8AC4", OnAccent = "#FFFFFF",
-            NavHover = "#1AFFFFFF", HoverCircle = "#2E343D"
+            NavHover = "#1AFFFFFF", HoverCircle = "#2E343D", Success = "#6FCF8E", Attention = "#F5A34A"
         };
     }
 
@@ -52,7 +52,7 @@ namespace TrustTunnelGui
 
         public static SolidColorBrush Accent, AccentText, AccentAdditional, Error, Background, Elevated,
             BackgroundAdditional, BackgroundSystem, NeutralLight, NeutralDark, NeutralBlack, NeutralBlend,
-            Scrim, PowerOff, SnackBackground, SnackText, LogWarn, LogError, LogDebug, White;
+            Scrim, PowerOff, SnackBackground, SnackText, LogWarn, LogError, LogDebug, White, Success, Attention;
 
         static C()
         {
@@ -71,6 +71,7 @@ namespace TrustTunnelGui
             NeutralBlend = B(p.NeutralBlend); Scrim = B(p.Scrim); PowerOff = B(p.PowerOff);
             SnackBackground = B(p.SnackBackground); SnackText = B(p.SnackText);
             LogWarn = B(p.LogWarn); LogError = B(p.LogError); LogDebug = B(p.LogDebug); White = B(p.OnAccent);
+            Success = B(p.Success); Attention = B(p.Attention);
         }
 
         public static SolidColorBrush B(string hex)
@@ -89,6 +90,9 @@ namespace TrustTunnelGui
         public static readonly Geometry Settings = G("M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z");
         public static readonly Geometry Power = G("M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z");
         public static readonly Geometry Update = G("M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z");
+        public static readonly Geometry Speed = G("M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zm-9.79 6.84a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z");
+        public static readonly Geometry Backup = G("M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z");
+        public static readonly Geometry Search = G("M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z");
         public static readonly Geometry Add = G("M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z");
         public static readonly Geometry NavigateNext = G("M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z");
         public static readonly Geometry Back = G("M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z");

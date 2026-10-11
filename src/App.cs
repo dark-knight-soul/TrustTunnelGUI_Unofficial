@@ -43,7 +43,13 @@ namespace TrustTunnelGui
         public Store Store;
         public VpnManager Vpn;
         public MainWindow Window;
+        public PingService Ping;
+        public event Action ReconnectChanged;
         Tray _tray;
+        DispatcherTimer _reconnectTimer;
+        int _reconnectAttempt;
+        static readonly int[] ReconnectDelays = { 2, 5, 10, 20, 30 };
+        const int MaxReconnectAttempts = 10;
         string _clientVersion;
         static Mutex _mutex;
         bool _autostart;
@@ -210,10 +216,19 @@ namespace TrustTunnelGui
 
             Vpn = new VpnManager(ClientExe, Path.Combine(DataDir, "trusttunnel_client.toml"), Path.Combine(LogDir, "client.log"), Dispatcher);
             Vpn.Failed += OnVpnFailed;
+            Vpn.UnexpectedExit += OnUnexpectedExit;
+            Vpn.StateChanged += delegate { if (Vpn.State == VpnState.Connected) _reconnectAttempt = 0; };
+            Ping = new PingService(Dispatcher);
+            System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += delegate(object s, System.Net.NetworkInformation.NetworkAvailabilityEventArgs e)
+            {
+                // Network is back: do not wait for the rest of the back-off delay.
+                if (e.IsAvailable) Dispatcher.BeginInvoke(new Action(delegate { if (IsReconnecting) ReconnectNow(); }));
+            };
 
             Window = new MainWindow();
             _tray = new Tray(this);
             Vpn.StateChanged += _tray.Update;
+            ReconnectChanged += _tray.Update;
 
             if (showEvent != null)
             {
@@ -244,7 +259,96 @@ namespace TrustTunnelGui
             if (toConnect == null && settings.AutoConnectOnLaunch)
                 toConnect = Store.Server(settings.SelectedServerId) ?? Store.Data.Servers.FirstOrDefault();
             if (toConnect != null) Connect(toConnect);
+
+            if (settings.CheckUpdates && DateTime.UtcNow - new DateTime(settings.LastUpdateCheck, DateTimeKind.Utc) > TimeSpan.FromDays(1))
+                Dispatcher.BeginInvoke(new Action(delegate { CheckForUpdates(false); }), DispatcherPriority.ApplicationIdle);
             return true;
+        }
+
+        // ---- Updates ----
+
+        public void CheckForUpdates(bool manual)
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                ReleaseInfo release = null;
+                Exception error = null;
+                try { release = UpdateChecker.Latest(); }
+                catch (Exception ex) { error = ex; }
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (error != null)
+                    {
+                        Log.Write("Update check failed: " + error.Message);
+                        if (manual) Window.ShowSnack(L.UpdateCheckFailed);
+                        return;
+                    }
+                    Store.Data.Settings.LastUpdateCheck = DateTime.UtcNow.Ticks;
+                    Store.Save();
+                    if (!UpdateChecker.IsNewer(release))
+                    {
+                        if (manual) Window.ShowSnack(L.UpToDate);
+                        return;
+                    }
+                    var url = release.Url;
+                    if (!Window.IsVisible && !manual)
+                    {
+                        _tray.Balloon(L.AppName, string.Format(L.UpdateAvailable, release.Version.ToString(3)), false, delegate { OpenUrl(url); });
+                        return;
+                    }
+                    Window.ShowDialog(string.Format(L.UpdateAvailable, release.Version.ToString(3)), UI.BodyMedium(string.Format(L.UpdateDescription, Version)),
+                        DialogAction.Cancel(L.Later),
+                        new DialogAction(L.Download, delegate { OpenUrl(url); return true; }) { IsDefault = true });
+                }));
+            });
+        }
+
+        // ---- Auto-reconnect ----
+
+        public bool IsReconnecting { get { return _reconnectTimer != null; } }
+
+        void OnUnexpectedExit(bool wasConnected)
+        {
+            var server = Store.Server(Vpn.ActiveServerId);
+            // Only a connection that worked is restored; a server that never connected (wrong password...) is not retried.
+            if (!Store.Data.Settings.AutoReconnect || server == null || (!wasConnected && _reconnectAttempt == 0)) return;
+            if (_reconnectAttempt >= MaxReconnectAttempts)
+            {
+                CancelReconnect();
+                OnVpnFailed(L.ReconnectGaveUp);
+                return;
+            }
+            int delay = ReconnectDelays[Math.Min(_reconnectAttempt, ReconnectDelays.Length - 1)];
+            _reconnectAttempt++;
+            StopReconnectTimer();
+            _reconnectTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(delay) };
+            _reconnectTimer.Tick += delegate { ReconnectNow(); };
+            _reconnectTimer.Start();
+            Log.Write("Reconnect attempt " + _reconnectAttempt + " in " + delay + " s");
+            if (Window.IsVisible) Window.ShowSnack(string.Format(L.ReconnectingIn, delay));
+            if (ReconnectChanged != null) ReconnectChanged();
+        }
+
+        void ReconnectNow()
+        {
+            StopReconnectTimer();
+            if (ReconnectChanged != null) ReconnectChanged();
+            var server = Store.Server(Vpn.ActiveServerId) ?? SelectedServer;
+            if (server != null && Vpn.State == VpnState.Disconnected) Connect(server, true);
+        }
+
+        public void CancelReconnect()
+        {
+            bool was = IsReconnecting || _reconnectAttempt > 0;
+            StopReconnectTimer();
+            _reconnectAttempt = 0;
+            if (was && ReconnectChanged != null) ReconnectChanged();
+        }
+
+        void StopReconnectTimer()
+        {
+            if (_reconnectTimer != null) _reconnectTimer.Stop();
+            _reconnectTimer = null;
         }
 
         // The old WinForms GUI kept the config next to the exe; import it once as the first server.
@@ -279,9 +383,14 @@ namespace TrustTunnelGui
         // ServersCard.onPressed: toggles the picked server or switches to another one.
         public void ToggleServer(ServerInfo server)
         {
+            if (IsReconnecting && Vpn.ActiveServerId == server.Id)
+            {
+                CancelReconnect();
+                return;
+            }
             if (Vpn.ActiveServerId == server.Id && Vpn.State != VpnState.Disconnected)
             {
-                if (Vpn.State != VpnState.Disconnecting) Vpn.Disconnect();
+                if (Vpn.State != VpnState.Disconnecting) Disconnect();
                 return;
             }
             Connect(server);
@@ -289,16 +398,21 @@ namespace TrustTunnelGui
 
         public void Connect(ServerInfo server)
         {
+            Connect(server, false);
+        }
+
+        void Connect(ServerInfo server, bool fromReconnect)
+        {
+            if (!fromReconnect) CancelReconnect();
             Store.Data.Settings.SelectedServerId = server.Id;
             Store.Save();
-            if (Store.Data.Settings.SocksAdapterMissing)
+            var adapterError = Store.Data.Settings.SocksAdapterMissing ? L.AdapterUnavailable
+                : Store.Data.Settings.TunAdapterMissing ? L.TunAdapterUnavailable : null;
+            if (adapterError != null)
             {
-                OnVpnFailed(L.AdapterUnavailable);
-                return;
-            }
-            if (Store.Data.Settings.TunAdapterMissing)
-            {
-                OnVpnFailed(L.TunAdapterUnavailable);
+                // While reconnecting, a missing adapter may come back: keep the back-off going.
+                if (fromReconnect) OnUnexpectedExit(false);
+                else OnVpnFailed(adapterError);
                 return;
             }
             // TUN needs an elevated client; SOCKS mode works with normal rights.
@@ -313,6 +427,7 @@ namespace TrustTunnelGui
 
         public void Disconnect()
         {
+            CancelReconnect();
             Vpn.Disconnect();
         }
 
@@ -342,6 +457,12 @@ namespace TrustTunnelGui
 
         void OnVpnFailed(string message)
         {
+            // Failed attempts during auto-reconnect are only logged; the final result is reported.
+            if (_reconnectAttempt > 0 && message != L.ReconnectGaveUp)
+            {
+                Log.Write("Reconnect attempt failed: " + message);
+                return;
+            }
             if (Window.IsVisible) Window.ShowSnack(message);
             else _tray.Balloon(L.AppName, message, true);
         }
@@ -546,9 +667,15 @@ namespace TrustTunnelGui
             {
                 if (e.Button == WinForms.MouseButtons.Left) _app.ShowMainWindow();
             };
-            _icon.BalloonTipClicked += delegate { _app.ShowMainWindow(); };
+            _icon.BalloonTipClicked += delegate
+            {
+                var action = _balloonAction;
+                if (action != null) action(); else _app.ShowMainWindow();
+            };
             Update();
         }
+
+        Action _balloonAction;
 
         internal static Icon MakeIcon(Size size, Color? dot, bool gray)
         {
@@ -608,7 +735,10 @@ namespace TrustTunnelGui
                 case VpnState.Connected: _icon.Icon = _on; status = L.Connected; break;
                 case VpnState.Connecting: _icon.Icon = _busy; status = L.Connecting; break;
                 case VpnState.Disconnecting: _icon.Icon = _busy; status = L.Disconnecting; break;
-                default: _icon.Icon = _off; status = L.Disconnected; break;
+                default:
+                    _icon.Icon = _app.IsReconnecting ? _busy : _off;
+                    status = _app.IsReconnecting ? L.Reconnecting : L.Disconnected;
+                    break;
             }
             var server = _app.Store.Server(vpn.ActiveServerId);
             var text = L.AppName + " — " + status + (server != null && vpn.State != VpnState.Disconnected ? " (" + server.Name + ")" : "");
@@ -670,8 +800,9 @@ namespace TrustTunnelGui
             _menu.Items.Add(quit);
         }
 
-        public void Balloon(string title, string text, bool error)
+        public void Balloon(string title, string text, bool error, Action onClick = null)
         {
+            _balloonAction = onClick;
             _icon.ShowBalloonTip(5000, title, text, error ? WinForms.ToolTipIcon.Warning : WinForms.ToolTipIcon.Info);
         }
 

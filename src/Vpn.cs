@@ -41,12 +41,24 @@ namespace TrustTunnelGui
         public event Action<LogLine> LineAdded;
         public event Action LogCleared;
         public event Action<string> Failed;
+        // The client stopped on its own (crash, lost connection, core gave up); argument: it had been connected.
+        public event Action<bool> UnexpectedExit;
+        public event Action<QueryEntry> QueryAdded;
+        public event Action QueriesCleared;
 
         public VpnState State { get; private set; }
         public string ActiveServerId { get; private set; }
         public readonly List<LogLine> Lines = new List<LogLine>();
+        public readonly List<QueryEntry> Queries = new List<QueryEntry>();
 
         const int MaxLines = 5000;
+        const int MaxQueries = 3000;
+
+        readonly QueryLogParser _queryParser = new QueryLogParser();
+        readonly System.Collections.Concurrent.ConcurrentQueue<string> _incoming = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        DispatcherTimer _drainTimer;
+        bool _reachedConnected;
+        bool _coreGaveUp;
 
         readonly string _clientExe;
         readonly string _configFile;
@@ -68,6 +80,29 @@ namespace TrustTunnelGui
             _logFile = logFile;
             _ui = ui;
             State = VpnState.Disconnected;
+            // Client output is handled in batches: debug logging can produce thousands of lines per second.
+            _drainTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, delegate { Drain(); }, ui);
+            _drainTimer.Start();
+            _queryParser.Added += delegate(QueryEntry q)
+            {
+                Queries.Add(q);
+                if (Queries.Count > MaxQueries) Queries.RemoveRange(0, Queries.Count - MaxQueries);
+                if (QueryAdded != null) QueryAdded(q);
+            };
+        }
+
+        void Drain()
+        {
+            string line;
+            int budget = 5000;
+            while (budget-- > 0 && _incoming.TryDequeue(out line)) HandleLine(line);
+        }
+
+        public void ClearQueries()
+        {
+            Queries.Clear();
+            _queryParser.Reset();
+            if (QueriesCleared != null) QueriesCleared();
         }
 
         public bool ClientExists { get { return File.Exists(_clientExe); } }
@@ -105,6 +140,8 @@ namespace TrustTunnelGui
             }
             _stopRequested = false;
             _lastError = null;
+            _reachedConnected = false;
+            _coreGaveUp = false;
             ActiveServerId = serverId;
             SetState(VpnState.Connecting);
             try
@@ -199,8 +236,7 @@ namespace TrustTunnelGui
         void OnData(object sender, DataReceivedEventArgs e)
         {
             if (e.Data == null) return;
-            var text = e.Data;
-            _ui.BeginInvoke(new Action(delegate { HandleLine(text); }));
+            _incoming.Enqueue(e.Data);
         }
 
         void HandleLine(string text)
@@ -208,12 +244,14 @@ namespace TrustTunnelGui
             var level = ParseLevel(text);
             AddLine(text, level);
             if (level == LogLevel.Error) _lastError = StripPrefix(text);
+            _queryParser.Feed(text);
 
             int idx = text.IndexOf("raise_state:", StringComparison.Ordinal);
             if (idx < 0 || _stopRequested) return;
             if (text.IndexOf("VPN_SS_CONNECTED", idx, StringComparison.Ordinal) >= 0)
             {
                 StopDisconnectedTimer();
+                _reachedConnected = true;
                 SetState(VpnState.Connected);
             }
             else if (text.IndexOf("VPN_SS_DISCONNECTED", idx, StringComparison.Ordinal) >= 0)
@@ -237,6 +275,7 @@ namespace TrustTunnelGui
                 StopDisconnectedTimer();
                 if (_process == null || _stopRequested) return;
                 var error = _lastError;
+                _coreGaveUp = true;
                 Disconnect();
                 RaiseFailed(L.ConnectFailed + (string.IsNullOrEmpty(error) ? "" : ": " + error));
             }, _ui);
@@ -266,9 +305,13 @@ namespace TrustTunnelGui
         void HandleExit(Process p, int code)
         {
             if (p != _process) return;
+            Drain();
             StopDisconnectedTimer();
-            bool expected = _stopRequested;
+            bool expected = _stopRequested && !_coreGaveUp;
             bool wasConnected = State == VpnState.Connected;
+            bool everConnected = _reachedConnected;
+            bool coreGaveUp = _coreGaveUp;
+            _queryParser.Reset();
             _process = null;
             _stopRequested = false;
             p.Dispose();
@@ -289,8 +332,13 @@ namespace TrustTunnelGui
             }
             if (!expected)
             {
-                var reason = string.IsNullOrEmpty(_lastError) ? "" : ": " + _lastError;
-                RaiseFailed((wasConnected ? L.ConnectionLost : L.ConnectFailed) + reason);
+                // When the core gave up the failure message has already been shown.
+                if (!coreGaveUp)
+                {
+                    var reason = string.IsNullOrEmpty(_lastError) ? "" : ": " + _lastError;
+                    RaiseFailed((wasConnected ? L.ConnectionLost : L.ConnectFailed) + reason);
+                }
+                if (UnexpectedExit != null) UnexpectedExit(everConnected);
             }
         }
 
@@ -359,6 +407,187 @@ namespace TrustTunnelGui
             int b = line.IndexOf("] ", StringComparison.Ordinal);
             var s = b >= 0 ? line.Substring(b + 2) : line;
             return s.Length > 200 ? s.Substring(0, 200) + "…" : s;
+        }
+    }
+
+    // One routed connection for the connection log (Flutter "query log" analogue).
+    public class QueryEntry : System.ComponentModel.INotifyPropertyChanged
+    {
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+
+        public DateTime Time { get; set; }
+        public string Source { get; set; }
+        public string Destination { get; set; }
+        public string Protocol { get; set; }
+        string _domain;
+        string _action;
+        long _download = -1, _upload = -1;
+
+        public string Domain { get { return _domain; } set { _domain = value; Changed("Domain"); Changed("Title"); } }
+        public string Action { get { return _action; } set { _action = value; Changed("Action"); Changed("ActionText"); Changed("ActionBrush"); } }
+
+        public void SetTraffic(long download, long upload)
+        {
+            _download = download;
+            _upload = upload;
+            Changed("Subtitle");
+        }
+
+        public string TimeText { get { return Time.ToString("HH:mm:ss"); } }
+
+        public string Title { get { return !string.IsNullOrEmpty(_domain) ? _domain : HostOf(Destination); } }
+
+        public string Subtitle
+        {
+            get
+            {
+                var s = Destination + " · " + Protocol;
+                if (_download >= 0) s += " · ↓ " + Bytes(_download) + " ↑ " + Bytes(_upload);
+                return s;
+            }
+        }
+
+        public string ActionText
+        {
+            get
+            {
+                switch (_action)
+                {
+                    case "TUNNEL": return L.Vpn;
+                    case "BYPASS": return L.Bypass;
+                    case "REJECT": return L.Blocked;
+                    default: return _action ?? "";
+                }
+            }
+        }
+
+        public System.Windows.Media.Brush ActionBrush
+        {
+            get
+            {
+                switch (_action)
+                {
+                    case "TUNNEL": return C.Accent;
+                    case "REJECT": return C.Error;
+                    default: return C.PowerOff;
+                }
+            }
+        }
+
+        public bool Matches(string filter)
+        {
+            if (string.IsNullOrEmpty(filter)) return true;
+            return (Title ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   (Destination ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   ActionText.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        static string HostOf(string endpoint)
+        {
+            if (string.IsNullOrEmpty(endpoint)) return "";
+            if (endpoint.StartsWith("["))
+            {
+                int close = endpoint.IndexOf(']');
+                return close > 0 ? endpoint.Substring(1, close - 1) : endpoint;
+            }
+            int colon = endpoint.LastIndexOf(':');
+            return colon > 0 && endpoint.IndexOf(':') == colon ? endpoint.Substring(0, colon) : endpoint;
+        }
+
+        static string Bytes(long b)
+        {
+            if (b < 1024) return b + " B";
+            if (b < 1024 * 1024) return (b / 1024.0).ToString("0.#") + " KB";
+            return (b / 1024.0 / 1024.0).ToString("0.#") + " MB";
+        }
+
+        void Changed(string name)
+        {
+            if (PropertyChanged != null) PropertyChanged(this, new System.ComponentModel.PropertyChangedEventArgs(name));
+        }
+    }
+
+    // Builds connection records from the client's per-connection debug lines:
+    //   "[L:12-R:34] New client connection request: 10.0.0.2:5000->1.2.3.4:443 (proto: TCP)"
+    //   "[L:12-R:34] Found domain in SNI data: example.com"
+    //   "[L:12-R:34] Final action: VPN_FCA_TUNNEL | VPN_FCA_BYPASS | VPN_FCA_REJECT"
+    //   "[L:12-R:34] Destroyed (download=1024, upload=512)"
+    class QueryLogParser
+    {
+        static readonly System.Text.RegularExpressions.Regex ConnRx =
+            new System.Text.RegularExpressions.Regex(@"\[L:(\d+)-R:(\d+)\] (.+)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex RequestRx =
+            new System.Text.RegularExpressions.Regex(@"^New client connection request: (\S+)->(\S+) \(proto: (\w+)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex DomainRx =
+            new System.Text.RegularExpressions.Regex(@"^Found domain in \S+ data: (\S+)", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex ActionRx =
+            new System.Text.RegularExpressions.Regex(@"^Final action: VPN_FCA_(\w+)", System.Text.RegularExpressions.RegexOptions.Compiled);
+        static readonly System.Text.RegularExpressions.Regex DestroyedRx =
+            new System.Text.RegularExpressions.Regex(@"^Destroyed \(download=(\d+), upload=(\d+)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        public event Action<QueryEntry> Added;
+
+        readonly Dictionary<string, QueryEntry> _open = new Dictionary<string, QueryEntry>();
+        readonly Dictionary<string, bool> _emitted = new Dictionary<string, bool>();
+        readonly Queue<string> _order = new Queue<string>();
+
+        public void Reset()
+        {
+            _open.Clear();
+            _emitted.Clear();
+            _order.Clear();
+        }
+
+        public void Feed(string line)
+        {
+            if (line.IndexOf("[L:", StringComparison.Ordinal) < 0) return;
+            var m = ConnRx.Match(line);
+            if (!m.Success) return;
+            var key = m.Groups[1].Value + "-" + m.Groups[2].Value;
+            var message = m.Groups[3].Value;
+            QueryEntry entry;
+            _open.TryGetValue(key, out entry);
+
+            var r = RequestRx.Match(message);
+            if (r.Success)
+            {
+                entry = new QueryEntry { Time = DateTime.Now, Source = r.Groups[1].Value, Destination = r.Groups[2].Value, Protocol = r.Groups[3].Value.ToUpperInvariant() };
+                _open[key] = entry;
+                _emitted.Remove(key);
+                _order.Enqueue(key);
+                while (_order.Count > 5000)
+                {
+                    var old = _order.Dequeue();
+                    _open.Remove(old);
+                    _emitted.Remove(old);
+                }
+                return;
+            }
+            if (entry == null) return;
+
+            var d = DomainRx.Match(message);
+            if (d.Success)
+            {
+                entry.Domain = d.Groups[1].Value;
+                return;
+            }
+            var a = ActionRx.Match(message);
+            if (a.Success)
+            {
+                entry.Action = a.Groups[1].Value.ToUpperInvariant();
+                if (!_emitted.ContainsKey(key))
+                {
+                    _emitted[key] = true;
+                    if (Added != null) Added(entry);
+                }
+                return;
+            }
+            var x = DestroyedRx.Match(message);
+            if (x.Success)
+            {
+                entry.SetTraffic(long.Parse(x.Groups[1].Value), long.Parse(x.Groups[2].Value));
+                _open.Remove(key);
+            }
         }
     }
 

@@ -107,7 +107,71 @@ namespace TrustTunnelGui
 
         public static string ConnectionLog = "Журнал подключений";
         public static string ConnectionLogEmptyTitle = "Подключений пока нет";
-        public static string ConnectionLogEmptyDescription = "Здесь отображается журнал VPN-клиента. Подключитесь к серверу, чтобы появились первые записи";
+        public static string ConnectionLogEmptyDescription = "Журнал показывает, куда идёт ваш трафик и как он маршрутизируется. Подключитесь к серверу и откройте сайт, чтобы появилась первая запись";
+        public static string ClientLog = "Журнал клиента";
+        public static string ClientLogEmptyTitle = "Записей пока нет";
+        public static string ClientLogEmptyDescription = "Здесь отображается журнал консольного клиента. Подключитесь к серверу, чтобы появились первые записи";
+        public static string Blocked = "Блок";
+        public static string Search = "Поиск";
+        public static string QueryLogNeedsDebug = "Клиент пишет сведения о подключениях только на уровне журналирования «Отладка»";
+        public static string EnableDebug = "Включить";
+
+        public static string PingServers = "Проверить пинг";
+        public static string Unreachable = "недоступен";
+        public static string PingMs = "{0} мс";
+        public static string Reconnecting = "Переподключение…";
+        public static string ReconnectingIn = "Соединение потеряно. Переподключение через {0} с";
+        public static string ReconnectGaveUp = "Не удалось восстановить подключение";
+        public static string AutoReconnect = "Автопереподключение";
+        public static string AutoReconnectDescription = "Восстанавливать подключение, если клиент неожиданно завершился";
+
+        public static string Updates = "Обновления";
+        public static string CheckUpdates = "Проверять обновления";
+        public static string CheckUpdatesDescription = "Раз в день проверять новую версию на GitHub";
+        public static string CheckForUpdates = "Проверить обновления";
+        public static string UpdateAvailable = "Доступна версия {0}";
+        public static string UpdateDescription = "У вас установлена версия {0}. Скачать новую версию со страницы релизов?";
+        public static string UpToDate = "Установлена последняя версия";
+        public static string UpdateCheckFailed = "Не удалось проверить обновления";
+        public static string Later = "Позже";
+        public static string Download = "Скачать";
+
+        public static string Advanced = "Дополнительно";
+        public static string AntiDpi = "Anti-DPI";
+        public static string AntiDpiDescription = "Включить меры против систем глубокой инспекции трафика";
+        public static string SkipVerification = "Не проверять сертификат сервера";
+        public static string SkipVerificationDescription = "Принимать любой сертификат сервера";
+        public static string SkipVerificationWarning = "Небезопасно: подключение можно перехватить. Используйте только для проверки";
+        public static string Mtu = "MTU";
+        public static string MtuHelper = "Размер пакета на виртуальном адаптере. Уменьшите, если сайты загружаются не полностью";
+        public static string MtuWrong = "Укажите значение от {0} до {1}";
+        public static string ChangeSystemDns = "Изменять системный DNS";
+        public static string ChangeSystemDnsDescription = "Назначать DNS-серверы клиента на время подключения";
+        public static string PostQuantum = "Постквантовый обмен ключами";
+        public static string PostQuantumDescription = "Использовать постквантовую группу в TLS-рукопожатии";
+
+        public static string BackupTitle = "Резервная копия";
+        public static string Export = "Экспорт";
+        public static string ExportDescription = "Серверы, профили маршрутизации и исключённые маршруты сохраняются в файл. Пароли серверов попадают в файл только в зашифрованном виде, если задать пароль для копии";
+        public static string ExportButton = "Экспортировать…";
+        public static string ImportDescription = "Загрузить серверы и профили из файла резервной копии: добавить к текущим или заменить их";
+        public static string ImportButton = "Импортировать…";
+        public static string BackupPassword = "Пароль для резервной копии";
+        public static string BackupPasswordHelper = "Необязательно. Без пароля пароли серверов не сохраняются";
+        public static string Continue = "Продолжить";
+        public static string BackupFilter = "Резервная копия TrustTunnel GUI";
+        public static string BackupExported = "Экспортировано серверов: {0}.";
+        public static string PasswordsNotExported = "Пароли не сохранены";
+        public static string BackupProtected = "Пароли в копии зашифрованы";
+        public static string WithoutPasswords = "Без паролей";
+        public static string ImportModeTitle = "Как импортировать?";
+        public static string ImportModeDescription = "В копии серверов: {0}, профилей: {1}. Добавить их к текущим или заменить все серверы, профили и исключённые маршруты?";
+        public static string ReplaceAll = "Заменить всё";
+        public static string AddToExisting = "Добавить";
+        public static string BackupImported = "Импортировано серверов: {0}.";
+        public static string PasswordsNotImported = "Пароли нужно ввести заново";
+        public static string BackupInvalid = "Файл не является резервной копией TrustTunnel GUI";
+        public static string BackupWrongPassword = "Неверный пароль";
         public static string CopyLog = "Копировать";
         public static string ClearLog = "Очистить";
         public static string OpenLogFolder = "Открыть папку журналов";
@@ -255,7 +319,40 @@ namespace TrustTunnelGui
             { "DiscardChangesTitle", "Discard changes?" }, { "DiscardChangesDescription", "Are you sure you want to discard all changes?" },
             { "DiscardChanges", "Discard changes" },
             { "ConnectionLog", "Connection log" }, { "ConnectionLogEmptyTitle", "No connections yet" },
-            { "ConnectionLogEmptyDescription", "The VPN client log is shown here. Connect to your server to add the first records" },
+            { "ConnectionLogEmptyDescription", "Connection log shows where your traffic goes and how it’s routed. Connect to your server and open a website to add the first record" },
+            { "ClientLog", "Client log" }, { "ClientLogEmptyTitle", "No records yet" },
+            { "ClientLogEmptyDescription", "The console client log is shown here. Connect to your server to add the first records" },
+            { "Blocked", "Blocked" }, { "Search", "Search" },
+            { "QueryLogNeedsDebug", "The client reports connections only with the Debug logging level" }, { "EnableDebug", "Enable" },
+            { "PingServers", "Check ping" }, { "Unreachable", "unreachable" }, { "PingMs", "{0} ms" },
+            { "Reconnecting", "Reconnecting…" }, { "ReconnectingIn", "Connection lost. Reconnecting in {0} s" },
+            { "ReconnectGaveUp", "Could not restore the connection" }, { "AutoReconnect", "Auto-reconnect" },
+            { "AutoReconnectDescription", "Restore the connection if the client stops unexpectedly" },
+            { "Updates", "Updates" }, { "CheckUpdates", "Check for updates" }, { "CheckUpdatesDescription", "Look for a new version on GitHub once a day" },
+            { "CheckForUpdates", "Check for updates" }, { "UpdateAvailable", "Version {0} is available" },
+            { "UpdateDescription", "You have version {0}. Download the new version from the releases page?" },
+            { "UpToDate", "You have the latest version" }, { "UpdateCheckFailed", "Could not check for updates" },
+            { "Later", "Later" }, { "Download", "Download" },
+            { "Advanced", "Advanced" }, { "AntiDpiDescription", "Enable measures against deep packet inspection" },
+            { "SkipVerification", "Do not verify the server certificate" }, { "SkipVerificationDescription", "Accept any server certificate" },
+            { "SkipVerificationWarning", "Insecure: the connection can be intercepted. Use for testing only" },
+            { "MtuHelper", "Packet size on the virtual adapter. Lower it if websites load only partially" },
+            { "MtuWrong", "Enter a value from {0} to {1}" }, { "ChangeSystemDns", "Change system DNS" },
+            { "ChangeSystemDnsDescription", "Use the client's DNS servers while connected" },
+            { "PostQuantum", "Post-quantum key exchange" }, { "PostQuantumDescription", "Use a post-quantum group in the TLS handshake" },
+            { "BackupTitle", "Backup" }, { "Export", "Export" },
+            { "ExportDescription", "Servers, routing profiles and excluded routes are saved to a file. Server passwords are included only encrypted, if you set a backup password" },
+            { "ExportButton", "Export…" },
+            { "ImportDescription", "Load servers and profiles from a backup file: add them to the current ones or replace them" },
+            { "ImportButton", "Import…" }, { "BackupPassword", "Backup password" },
+            { "BackupPasswordHelper", "Optional. Without it server passwords are not saved" }, { "Continue", "Continue" },
+            { "BackupFilter", "TrustTunnel GUI backup" }, { "BackupExported", "Servers exported: {0}." },
+            { "PasswordsNotExported", "Passwords were not saved" }, { "BackupProtected", "Passwords in this backup are encrypted" },
+            { "WithoutPasswords", "Without passwords" }, { "ImportModeTitle", "How to import?" },
+            { "ImportModeDescription", "The backup has {0} servers and {1} profiles. Add them to the current ones or replace all servers, profiles and excluded routes?" },
+            { "ReplaceAll", "Replace all" }, { "AddToExisting", "Add" }, { "BackupImported", "Servers imported: {0}." },
+            { "PasswordsNotImported", "Passwords need to be entered again" },
+            { "BackupInvalid", "The file is not a TrustTunnel GUI backup" }, { "BackupWrongPassword", "Wrong password" },
             { "CopyLog", "Copy" }, { "ClearLog", "Clear" }, { "OpenLogFolder", "Open log folder" }, { "LogCopied", "Log copied" },
             { "AppLogging", "App logging" }, { "LoggingLevel", "Logging level" }, { "LoggingDefault", "Default" },
             { "LoggingDefaultDescription", "Logs the main events" }, { "LoggingDebug", "Debug" },

@@ -22,7 +22,7 @@ namespace TrustTunnelGui
 
         public ServersPage(MainWindow main) : base(main)
         {
-            SetAppBar(L.Servers, null);
+            SetAppBar(L.Servers, null, UI.IconButton(Icons.Speed, L.PingServers, delegate { App.I.Ping.PingAll(App.I.Store.Data.Servers); }));
         }
 
         public override void OnShown()
@@ -31,13 +31,33 @@ namespace TrustTunnelGui
             App.I.Vpn.StateChanged += Render;
             App.I.Store.Changed -= Render;
             App.I.Store.Changed += Render;
+            App.I.Ping.Updated -= Render;
+            App.I.Ping.Updated += Render;
+            App.I.ReconnectChanged -= Render;
+            App.I.ReconnectChanged += Render;
             Render();
+            App.I.Ping.PingAllIfStale(App.I.Store.Data.Servers, TimeSpan.FromMinutes(1));
         }
 
         public override void OnRemoved()
         {
             App.I.Vpn.StateChanged -= Render;
             App.I.Store.Changed -= Render;
+            App.I.Ping.Updated -= Render;
+            App.I.ReconnectChanged -= Render;
+        }
+
+        // " · 42 ms" in green/orange, " · unreachable" in red, "…" while measuring.
+        static void PingBadge(ServerInfo s, out string text, out Brush brush)
+        {
+            var ping = App.I.Ping;
+            var ms = ping.Result(s.Id);
+            brush = C.NeutralLight;
+            if (ping.IsRunning(s.Id) && !ms.HasValue) { text = " · …"; return; }
+            if (!ms.HasValue) { text = null; return; }
+            if (ms.Value == PingService.Unreachable) { text = " · " + L.Unreachable; brush = C.Error; return; }
+            text = " · " + string.Format(L.PingMs, ms.Value);
+            brush = ms.Value < 150 ? C.Success : C.Attention;
         }
 
         void Render()
@@ -54,7 +74,10 @@ namespace TrustTunnelGui
             for (int i = 0; i < servers.Count; i++)
             {
                 var s = servers[i];
-                list.Children.Add(Tiles.Separated(s.Name, s.Address, delegate { Main.Push(new ServerDetailsPage(Main, s)); }, PowerButton(s)));
+                string badge;
+                Brush badgeBrush;
+                PingBadge(s, out badge, out badgeBrush);
+                list.Children.Add(Tiles.Separated(s.Name, s.Address, delegate { Main.Push(new ServerDetailsPage(Main, s)); }, PowerButton(s), true, badge, badgeBrush));
                 if (i != servers.Count - 1) list.Children.Add(UI.Divider());
             }
             _scroll.Content = list;
@@ -115,7 +138,8 @@ namespace TrustTunnelGui
         {
             var vpn = App.I.Vpn;
             var state = vpn.ActiveServerId == server.Id ? vpn.State : VpnState.Disconnected;
-            bool pending = state == VpnState.Connecting || state == VpnState.Disconnecting;
+            bool pending = state == VpnState.Connecting || state == VpnState.Disconnecting ||
+                           (App.I.IsReconnecting && vpn.ActiveServerId == server.Id);
             bool selected = pending || state == VpnState.Connected;
 
             var icon = UI.Icon(pending ? Icons.Update : Icons.Power, 24, C.White);
@@ -133,7 +157,8 @@ namespace TrustTunnelGui
                 Width = 40,
                 Content = icon,
                 Background = selected ? C.Accent : C.PowerOff,
-                ToolTip = state == VpnState.Disconnected ? L.Connect : (state == VpnState.Connected ? L.Disconnect : (state == VpnState.Connecting ? L.Connecting : L.Disconnecting))
+                ToolTip = pending && state == VpnState.Disconnected ? L.Reconnecting
+                    : state == VpnState.Disconnected ? L.Connect : (state == VpnState.Connected ? L.Disconnect : (state == VpnState.Connecting ? L.Connecting : L.Disconnecting))
             };
             b.Click += delegate { App.I.ToggleServer(server); };
             return b;
@@ -155,6 +180,9 @@ namespace TrustTunnelGui
         readonly FormField _dns = new FormField(L.DnsLabel, L.DnsHint, L.DnsHelper, 4);
         readonly FormField _clientRandom = new FormField(L.ClientRandom, L.ClientRandomHint, L.ClientRandomHelper);
         readonly CheckBox _ipv6 = new CheckBox();
+        readonly CheckBox _antiDpi = new CheckBox();
+        readonly CheckBox _skipVerify = new CheckBox();
+        readonly TextBlock _skipWarning = UI.BodySmall("", C.Error);
         readonly TextBlock _certName = UI.BodyMedium("", C.NeutralDark);
         Button _certRemove;
         string _certificate = "";
@@ -213,6 +241,23 @@ namespace TrustTunnelGui
             _ipv6.Margin = new Thickness(-10, 0, 0, 0);
             form.Children.Add(_ipv6);
 
+            var advanced = UI.Text(L.Advanced, 14, FontWeights.SemiBold, C.AccentText);
+            advanced.Margin = new Thickness(0, 20, 0, 4);
+            form.Children.Add(advanced);
+            _antiDpi.Style = UI.S("Check");
+            _antiDpi.Content = CheckContent(L.AntiDpi, L.AntiDpiDescription);
+            _antiDpi.Margin = new Thickness(-10, 0, 0, 0);
+            form.Children.Add(_antiDpi);
+            _skipVerify.Style = UI.S("Check");
+            _skipVerify.Content = CheckContent(L.SkipVerification, L.SkipVerificationDescription);
+            _skipVerify.Margin = new Thickness(-10, 0, 0, 0);
+            form.Children.Add(_skipVerify);
+            _skipWarning.Text = L.SkipVerificationWarning;
+            _skipWarning.Margin = new Thickness(38, 0, 0, 0);
+            form.Children.Add(_skipWarning);
+            _skipVerify.Checked += delegate { _skipWarning.Visibility = Visibility.Visible; };
+            _skipVerify.Unchecked += delegate { _skipWarning.Visibility = Visibility.Collapsed; };
+
             SetBody(UI.Scroll(form));
 
             var submit = UI.Filled(existing == null ? L.Add : L.Save, Submit);
@@ -238,7 +283,18 @@ namespace TrustTunnelGui
             _dns.Value = string.Join("\n", s.DnsServers);
             _clientRandom.Value = s.ClientRandom;
             _ipv6.IsChecked = s.Ipv6;
+            _antiDpi.IsChecked = s.AntiDpi;
+            _skipVerify.IsChecked = s.SkipVerification;
+            _skipWarning.Visibility = s.SkipVerification ? Visibility.Visible : Visibility.Collapsed;
             SetCertificate(s.Certificate, s.CertificateName);
+        }
+
+        static StackPanel CheckContent(string title, string description)
+        {
+            var sp = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
+            sp.Children.Add(UI.BodyMedium(title));
+            sp.Children.Add(UI.BodySmall(description));
+            return sp;
         }
 
         void SetCertificate(string pem, string name)
@@ -252,7 +308,8 @@ namespace TrustTunnelGui
         string Snapshot()
         {
             return string.Join("\u0001", _name.Value, _address.Value, _domain.Value, _sni.Value, _username.Value, _password.Value,
-                _quic.IsChecked == true ? "3" : "2", _profile.SelectedKey, _dns.Value, _clientRandom.Value, _ipv6.IsChecked == true ? "1" : "0", _certificate);
+                _quic.IsChecked == true ? "3" : "2", _profile.SelectedKey, _dns.Value, _clientRandom.Value, _ipv6.IsChecked == true ? "1" : "0", _certificate,
+                _antiDpi.IsChecked == true ? "1" : "0", _skipVerify.IsChecked == true ? "1" : "0");
         }
 
         public override bool IsDirty { get { return Snapshot() != _initial; } }
@@ -378,6 +435,8 @@ namespace TrustTunnelGui
             s.DnsServers = Validation.Lines(_dns.Value);
             s.ClientRandom = _clientRandom.Value.Trim();
             s.Ipv6 = _ipv6.IsChecked == true;
+            s.AntiDpi = _antiDpi.IsChecked == true;
+            s.SkipVerification = _skipVerify.IsChecked == true;
             s.Certificate = _certificate;
             s.CertificateName = _certificateName;
 
@@ -728,7 +787,9 @@ namespace TrustTunnelGui
         {
             SetAppBar(L.Settings, null);
             var list = new StackPanel();
-            list.Children.Add(Tiles.Arrow(L.ConnectionLog, delegate { Main.Push(new ConnectionLogPage(Main)); }));
+            list.Children.Add(Tiles.Arrow(L.ConnectionLog, delegate { Main.Push(new QueryLogPage(Main)); }));
+            list.Children.Add(UI.Divider());
+            list.Children.Add(Tiles.Arrow(L.ClientLog, delegate { Main.Push(new ConnectionLogPage(Main)); }));
             list.Children.Add(UI.Divider());
             list.Children.Add(Tiles.Arrow(L.AppLogging, delegate { Main.Push(new AppLoggingPage(Main)); }));
             list.Children.Add(UI.Divider());
@@ -739,6 +800,8 @@ namespace TrustTunnelGui
             list.Children.Add(Tiles.Arrow(L.ExcludedRoutes, delegate { Main.Push(new ExcludedRoutesPage(Main)); }));
             list.Children.Add(UI.Divider());
             list.Children.Add(Tiles.Arrow(L.Appearance, delegate { Main.Push(new AppearancePage(Main)); }));
+            list.Children.Add(UI.Divider());
+            list.Children.Add(Tiles.Arrow(L.BackupTitle, delegate { Main.Push(new BackupPage(Main)); }));
             list.Children.Add(UI.Divider());
             list.Children.Add(Tiles.Arrow(L.FollowOnGithub, delegate { App.OpenUrl("https://github.com/TrustTunnel"); }, Icons.OpenInNew));
             list.Children.Add(UI.Divider());
@@ -759,7 +822,7 @@ namespace TrustTunnelGui
 "  <TextBlock Text='{Binding Text}' Foreground='{Binding Brush}' TextWrapping='NoWrap'/>" +
 "</DataTemplate>";
 
-        static string ItemStyleXaml()
+        internal static string ItemStyleXaml()
         {
             return
 "<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ListBoxItem'>" +
@@ -777,7 +840,7 @@ namespace TrustTunnelGui
 
         public ConnectionLogPage(MainWindow main) : base(main)
         {
-            SetAppBar(L.ConnectionLog, Icons.Back,
+            SetAppBar(L.ClientLog, Icons.Back,
                 UI.IconButton(Icons.Copy, L.CopyLog, CopyAll),
                 UI.IconButton(Icons.ClearAll, L.ClearLog, delegate { App.I.Vpn.ClearLog(); }),
                 UI.IconButton(Icons.Folder, L.OpenLogFolder, delegate { App.OpenFolder(App.I.LogDir); }));
@@ -799,7 +862,7 @@ namespace TrustTunnelGui
             ScrollViewer.SetHorizontalScrollBarVisibility(_list, ScrollBarVisibility.Auto);
             _list.CommandBindings.Add(new CommandBinding(ApplicationCommands.Copy, delegate { CopySelected(); }));
 
-            _empty = Placeholder(Icons.ListAlt, L.ConnectionLogEmptyTitle, L.ConnectionLogEmptyDescription, null, null);
+            _empty = Placeholder(Icons.ListAlt, L.ClientLogEmptyTitle, L.ClientLogEmptyDescription, null, null);
             _host.Children.Add(_list);
             _host.Children.Add(_empty);
             SetBody(_host);
@@ -876,6 +939,273 @@ namespace TrustTunnelGui
         static void SetClipboard(string text)
         {
             try { Clipboard.SetText(text ?? ""); } catch { }
+        }
+    }
+
+    // Connection log (Flutter QueryLogScreen): one row per connection with the routing decision.
+    class QueryLogPage : Page
+    {
+        readonly ObservableCollection<QueryEntry> _items = new ObservableCollection<QueryEntry>();
+        readonly ListBox _list;
+        readonly FrameworkElement _empty;
+        readonly Border _debugBanner;
+        readonly TextBox _search;
+        string _filter = "";
+        const int MaxShown = 3000;
+
+        static string ItemTemplateXaml()
+        {
+            var p = C.P;
+            return
+"<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>" +
+"  <Grid Margin='0,6'>" +
+"    <Grid.ColumnDefinitions><ColumnDefinition Width='72'/><ColumnDefinition Width='*'/><ColumnDefinition Width='Auto'/></Grid.ColumnDefinitions>" +
+"    <TextBlock Text='{Binding TimeText}' Foreground='" + p.NeutralDark + "' FontSize='12' VerticalAlignment='Center'/>" +
+"    <StackPanel Grid.Column='1' Margin='0,0,12,0'>" +
+"      <TextBlock Text='{Binding Title}' Foreground='" + p.NeutralBlack + "' FontSize='14' FontWeight='SemiBold' TextTrimming='CharacterEllipsis'/>" +
+"      <TextBlock Text='{Binding Subtitle}' Foreground='" + p.NeutralLight + "' FontSize='12' TextTrimming='CharacterEllipsis'/>" +
+"    </StackPanel>" +
+"    <Border Grid.Column='2' Background='{Binding ActionBrush}' CornerRadius='10' Padding='10,2' VerticalAlignment='Center'>" +
+"      <TextBlock Text='{Binding ActionText}' Foreground='" + p.OnAccent + "' FontSize='12' FontWeight='SemiBold'/>" +
+"    </Border>" +
+"  </Grid>" +
+"</DataTemplate>";
+        }
+
+        public QueryLogPage(MainWindow main) : base(main)
+        {
+            SetAppBar(L.ConnectionLog, Icons.Back, UI.IconButton(Icons.ClearAll, L.ClearLog, delegate { App.I.Vpn.ClearQueries(); }));
+
+            var dock = new DockPanel();
+
+            _debugBanner = new Border { Background = C.BackgroundAdditional, CornerRadius = new CornerRadius(12), Margin = new Thickness(16, 0, 16, 8), Padding = new Thickness(16, 8, 8, 8) };
+            var bannerRow = new DockPanel();
+            var enable = UI.TextButton(L.EnableDebug, EnableDebug);
+            DockPanel.SetDock(enable, Dock.Right);
+            bannerRow.Children.Add(enable);
+            var bannerText = UI.BodyMedium(L.QueryLogNeedsDebug, C.NeutralDark);
+            bannerText.VerticalAlignment = VerticalAlignment.Center;
+            bannerRow.Children.Add(bannerText);
+            _debugBanner.Child = bannerRow;
+            DockPanel.SetDock(_debugBanner, Dock.Top);
+            dock.Children.Add(_debugBanner);
+
+            var searchGrid = new Grid { Margin = new Thickness(16, 0, 16, 8) };
+            _search = new TextBox { Style = UI.S("TextBoxField"), Padding = new Thickness(40, 10, 12, 10) };
+            searchGrid.Children.Add(_search);
+            var searchIcon = UI.Icon(Icons.Search, 20, C.NeutralDark);
+            searchIcon.HorizontalAlignment = HorizontalAlignment.Left;
+            searchIcon.VerticalAlignment = VerticalAlignment.Center;
+            searchIcon.Margin = new Thickness(12, 0, 0, 0);
+            searchIcon.IsHitTestVisible = false;
+            searchGrid.Children.Add(searchIcon);
+            var hint = new TextBlock { Text = L.Search, Foreground = C.NeutralLight, FontSize = 14, Margin = new Thickness(42, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            searchGrid.Children.Add(hint);
+            _search.TextChanged += delegate
+            {
+                hint.Visibility = _search.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                _filter = _search.Text.Trim();
+                Reload();
+            };
+            DockPanel.SetDock(searchGrid, Dock.Top);
+            dock.Children.Add(searchGrid);
+
+            _list = new ListBox
+            {
+                ItemsSource = _items,
+                BorderThickness = new Thickness(0),
+                Background = C.Background,
+                ItemTemplate = (DataTemplate)XamlReader.Parse(ItemTemplateXaml()),
+                ItemContainerStyle = (Style)XamlReader.Parse(ConnectionLogPage.ItemStyleXaml()),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch
+            };
+            ScrollViewer.SetHorizontalScrollBarVisibility(_list, ScrollBarVisibility.Disabled);
+            VirtualizingStackPanel.SetIsVirtualizing(_list, true);
+            VirtualizingStackPanel.SetVirtualizationMode(_list, VirtualizationMode.Recycling);
+            _empty = Placeholder(Icons.ListAlt, L.ConnectionLogEmptyTitle, L.ConnectionLogEmptyDescription, null, null);
+            var host = new Grid();
+            host.Children.Add(_list);
+            host.Children.Add(_empty);
+            dock.Children.Add(host);
+            SetBody(dock);
+
+            UpdateBanner();
+            Reload();
+        }
+
+        public override void OnShown()
+        {
+            App.I.Vpn.QueryAdded -= OnAdded;
+            App.I.Vpn.QueryAdded += OnAdded;
+            App.I.Vpn.QueriesCleared -= Reload;
+            App.I.Vpn.QueriesCleared += Reload;
+        }
+
+        public override void OnRemoved()
+        {
+            App.I.Vpn.QueryAdded -= OnAdded;
+            App.I.Vpn.QueriesCleared -= Reload;
+        }
+
+        void UpdateBanner()
+        {
+            _debugBanner.Visibility = App.I.Store.Data.Settings.LogLevel == "debug" ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        void EnableDebug()
+        {
+            App.I.Store.Data.Settings.LogLevel = "debug";
+            App.I.Store.Save();
+            UpdateBanner();
+            // The client reads the level at start, so an active connection is restarted.
+            App.I.ReconnectIfActive(delegate { return true; });
+            Main.ShowSnack(L.ChangesSaved);
+        }
+
+        void Reload()
+        {
+            _items.Clear();
+            var queries = App.I.Vpn.Queries;
+            for (int i = queries.Count - 1; i >= 0 && _items.Count < MaxShown; i--)
+                if (queries[i].Matches(_filter)) _items.Add(queries[i]);
+            UpdateEmpty();
+        }
+
+        void OnAdded(QueryEntry entry)
+        {
+            if (!entry.Matches(_filter)) return;
+            _items.Insert(0, entry);
+            if (_items.Count > MaxShown) _items.RemoveAt(_items.Count - 1);
+            UpdateEmpty();
+        }
+
+        void UpdateEmpty()
+        {
+            bool empty = _items.Count == 0;
+            _empty.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+            _list.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+
+    class BackupPage : Page
+    {
+        public BackupPage(MainWindow main) : base(main)
+        {
+            SetAppBar(L.BackupTitle, Icons.Back);
+            var list = new StackPanel();
+
+            list.Children.Add(Tiles.Section(L.Export));
+            var exportText = UI.BodyMedium(L.ExportDescription, C.NeutralDark);
+            exportText.Margin = new Thickness(16, 4, 16, 12);
+            list.Children.Add(exportText);
+            var export = UI.Filled(L.ExportButton, Export);
+            export.HorizontalAlignment = HorizontalAlignment.Left;
+            export.Margin = new Thickness(16, 0, 16, 8);
+            list.Children.Add(export);
+
+            list.Children.Add(Tiles.Section(L.Import));
+            var importText = UI.BodyMedium(L.ImportDescription, C.NeutralDark);
+            importText.Margin = new Thickness(16, 4, 16, 12);
+            list.Children.Add(importText);
+            var import = UI.Outlined(L.ImportButton, Icons.FileOpen, Import);
+            import.HorizontalAlignment = HorizontalAlignment.Left;
+            import.Margin = new Thickness(16, 0, 16, 8);
+            list.Children.Add(import);
+
+            SetBody(UI.Scroll(list));
+        }
+
+        void Export()
+        {
+            var field = new FormField(L.BackupPassword, L.PasswordHint, L.BackupPasswordHelper, 1, true) { Width = 440, Margin = new Thickness(0) };
+            Main.ShowDialog(L.ExportButton, field,
+                DialogAction.Cancel(),
+                new DialogAction(L.Continue, delegate
+                {
+                    var password = field.Value;
+                    Dispatcher.BeginInvoke(new Action(delegate { SaveBackup(password); }));
+                    return true;
+                }) { IsDefault = true });
+        }
+
+        void SaveBackup(string password)
+        {
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = L.BackupFilter + " (*.ttgui.json)|*.ttgui.json|JSON (*.json)|*.json",
+                FileName = "trusttunnel-gui-" + DateTime.Now.ToString("yyyy-MM-dd") + ".ttgui.json"
+            };
+            if (dlg.ShowDialog(Main) != true) return;
+            try
+            {
+                Backup.Export(App.I.Store.Data, dlg.FileName, password);
+                var n = App.I.Store.Data.Servers.Count;
+                Main.ShowSnack(string.Format(L.BackupExported, n) + (string.IsNullOrEmpty(password) && n > 0 ? " " + L.PasswordsNotExported : ""));
+            }
+            catch (Exception ex)
+            {
+                Main.ShowSnack(L.SomethingWrong + ": " + ex.Message);
+            }
+        }
+
+        void Import()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog { Filter = L.BackupFilter + " (*.ttgui.json;*.json)|*.ttgui.json;*.json|*.*|*.*" };
+            if (dlg.ShowDialog(Main) != true) return;
+            BackupFile file;
+            try
+            {
+                file = Backup.Read(dlg.FileName);
+            }
+            catch (BackupException ex)
+            {
+                Main.ShowSnack(ex.Message);
+                return;
+            }
+            if (file.Secrets == null)
+            {
+                ChooseMode(file, new Dictionary<string, string>());
+                return;
+            }
+            var field = new FormField(L.BackupPassword, L.PasswordHint, null, 1, true) { Width = 440, Margin = new Thickness(0) };
+            Main.ShowDialog(L.BackupProtected, field,
+                new DialogAction(L.WithoutPasswords, delegate
+                {
+                    Dispatcher.BeginInvoke(new Action(delegate { ChooseMode(file, new Dictionary<string, string>()); }));
+                    return true;
+                }) { IsCancel = true },
+                new DialogAction(L.Continue, delegate
+                {
+                    try
+                    {
+                        var passwords = Backup.Passwords(file, field.Value);
+                        Dispatcher.BeginInvoke(new Action(delegate { ChooseMode(file, passwords); }));
+                        return true;
+                    }
+                    catch (BackupException ex)
+                    {
+                        field.Error = ex.Message;
+                        return false;
+                    }
+                }) { IsDefault = true });
+        }
+
+        void ChooseMode(BackupFile file, Dictionary<string, string> passwords)
+        {
+            var description = UI.BodyMedium(string.Format(L.ImportModeDescription, file.Servers.Count, file.Profiles.Count(p => !p.IsDefault)));
+            Main.ShowDialog(L.ImportModeTitle, description,
+                DialogAction.Cancel(),
+                new DialogAction(L.ReplaceAll, delegate { Apply(file, passwords, true); return true; }) { Danger = true },
+                new DialogAction(L.AddToExisting, delegate { Apply(file, passwords, false); return true; }) { IsDefault = true });
+        }
+
+        void Apply(BackupFile file, Dictionary<string, string> passwords, bool replace)
+        {
+            if (replace && App.I.Vpn.State != VpnState.Disconnected) App.I.Disconnect();
+            int count = Backup.Apply(App.I.Store.Data, file, passwords, replace);
+            App.I.Store.Save();
+            bool missingPasswords = file.Servers.Any(s => !passwords.ContainsKey(s.Id));
+            Main.ShowSnack(string.Format(L.BackupImported, count) + (missingPasswords && count > 0 ? " " + L.PasswordsNotImported : ""));
         }
     }
 
@@ -956,6 +1286,21 @@ namespace TrustTunnelGui
                 App.I.Store.Save();
                 App.I.ReconnectIfActive(delegate { return true; });
             }, out kill));
+            System.Windows.Controls.Primitives.ToggleButton reconnect;
+            list.Children.Add(Tiles.Switch(L.AutoReconnect, L.AutoReconnectDescription, settings.AutoReconnect, delegate(bool on)
+            {
+                settings.AutoReconnect = on;
+                App.I.Store.Save();
+                if (!on) App.I.CancelReconnect();
+            }, out reconnect));
+
+            list.Children.Add(Tiles.Section(L.Updates));
+            System.Windows.Controls.Primitives.ToggleButton updates;
+            list.Children.Add(Tiles.Switch(L.CheckUpdates, L.CheckUpdatesDescription, settings.CheckUpdates, delegate(bool on)
+            {
+                settings.CheckUpdates = on;
+                App.I.Store.Save();
+            }, out updates));
 
             SetBody(UI.Scroll(list));
             Refresh();
@@ -1023,6 +1368,9 @@ namespace TrustTunnelGui
         readonly StackPanel _tunPanel = new StackPanel();
         readonly DropdownField _tunAdapter = new DropdownField(L.TunAdapter);
         readonly TextBlock _tunInfo = UI.BodyMedium("", C.NeutralDark);
+        readonly FormField _mtu = new FormField(L.Mtu, Defaults.Mtu.ToString(), L.MtuHelper);
+        System.Windows.Controls.Primitives.ToggleButton _dnsSwitch;
+        System.Windows.Controls.Primitives.ToggleButton _pqSwitch;
         List<NetAdapter> _outbound = new List<NetAdapter>();
         readonly Button _save;
         List<NetAdapter> _adapters = new List<NetAdapter>();
@@ -1056,6 +1404,11 @@ namespace TrustTunnelGui
             _tunPanel.Children.Add(UI.MaxWidthLeft(tunForm, 640));
             _tunInfo.Margin = new Thickness(16, 0, 16, 12);
             _tunPanel.Children.Add(_tunInfo);
+            var mtuForm = new StackPanel { Margin = new Thickness(16, 8, 16, 0) };
+            _mtu.Value = s.Mtu.ToString();
+            mtuForm.Children.Add(_mtu);
+            _tunPanel.Children.Add(UI.MaxWidthLeft(mtuForm, 640));
+            _tunPanel.Children.Add(Tiles.Switch(L.ChangeSystemDns, L.ChangeSystemDnsDescription, s.ChangeSystemDns, delegate { Update(); }, out _dnsSwitch));
             list.Children.Add(_tunPanel);
             LoadOutbound(s.TunAdapterId);
             _tunAdapter.Changed += Update;
@@ -1091,6 +1444,10 @@ namespace TrustTunnelGui
             auth.Children.Add(_password);
             _socksPanel.Children.Add(UI.MaxWidthLeft(auth, 640));
             list.Children.Add(_socksPanel);
+
+            list.Children.Add(Tiles.Section(L.Advanced));
+            list.Children.Add(Tiles.Switch(L.PostQuantum, L.PostQuantumDescription, s.PostQuantum, delegate { Update(); }, out _pqSwitch));
+            _mtu.Changed += Update;
             SetBody(UI.Scroll(list));
 
             _save = UI.Filled(L.Save, Save);
@@ -1135,7 +1492,8 @@ namespace TrustTunnelGui
 
         string Snapshot()
         {
-            return string.Join("\u0001", _socks.IsChecked == true ? "socks" : "tun", _tunAdapter.SelectedKey ?? "", _port.Value,
+            return string.Join("\u0001", _socks.IsChecked == true ? "socks" : "tun", _tunAdapter.SelectedKey ?? "", _mtu.Value,
+                _dnsSwitch != null && _dnsSwitch.IsChecked == true ? "1" : "0", _pqSwitch != null && _pqSwitch.IsChecked == true ? "1" : "0", _port.Value,
                 _lan != null && _lan.IsChecked == true ? "1" : "0", _adapter.SelectedKey ?? "", _username.Value, _password.Value);
         }
 
@@ -1194,10 +1552,16 @@ namespace TrustTunnelGui
             string pairError = (user.Length == 0) != (pass.Length == 0) ? L.SocksAuthPair : null;
             _username.Error = socks && user.Length == 0 ? pairError : null;
             _password.Error = socks && pass.Length == 0 ? pairError : null;
-            if (socks && (!portOk || pairError != null)) return;
+            int mtu;
+            bool mtuOk = int.TryParse(_mtu.Value.Trim(), out mtu) && mtu >= Defaults.MinMtu && mtu <= Defaults.MaxMtu;
+            _mtu.Error = mtuOk ? null : string.Format(L.MtuWrong, Defaults.MinMtu, Defaults.MaxMtu);
+            if (!mtuOk || (socks && (!portOk || pairError != null))) return;
 
             var s = App.I.Store.Data.Settings;
             s.ListenerMode = socks ? "socks" : "tun";
+            s.Mtu = mtu;
+            s.ChangeSystemDns = _dnsSwitch.IsChecked == true;
+            s.PostQuantum = _pqSwitch.IsChecked == true;
             var tunId = _tunAdapter.SelectedKey ?? "";
             var tunAdapter = _outbound.FirstOrDefault(a => a.Id == tunId);
             if (tunId != s.TunAdapterId || tunAdapter != null) s.TunAdapterName = tunAdapter != null ? tunAdapter.Name : "";
@@ -1401,6 +1765,11 @@ namespace TrustTunnelGui
             sp.Children.Add(VersionRow(L.ClientVersion, _clientVersion));
 
             var links = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 20, 0, 0) };
+            var update = UI.Filled(L.CheckForUpdates, delegate { App.I.CheckForUpdates(true); });
+            update.HorizontalAlignment = HorizontalAlignment.Center;
+            update.Margin = new Thickness(0, 20, 0, 0);
+            sp.Children.Add(update);
+            links.Children.Add(UI.TextButton("TrustTunnel GUI", delegate { App.OpenUrl(UpdateChecker.RepoUrl); }));
             links.Children.Add(UI.TextButton("TrustTunnel Client", delegate { App.OpenUrl("https://github.com/TrustTunnel/TrustTunnelClient"); }));
             links.Children.Add(UI.TextButton("TrustTunnel", delegate { App.OpenUrl("https://github.com/TrustTunnel/TrustTunnel"); }));
             sp.Children.Add(links);

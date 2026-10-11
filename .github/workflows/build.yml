@@ -1,0 +1,93 @@
+name: Build
+
+# Push a tag like v1.2.0 to build and publish a release.
+# "Run workflow" on the Actions tab builds the packages as artifacts without publishing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # TrustTunnel console client bundled into the packages.
+  CLIENT_VERSION: v1.1.11
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Signing is optional: add the SIGN_PFX_BASE64 and SIGN_PFX_PASSWORD repository secrets to enable it.
+      HAS_CERT: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version
+        shell: pwsh
+        run: |
+          $version = [regex]::Match((Get-Content src/App.cs -Raw), 'AssemblyVersion\("(\d+\.\d+\.\d+)').Groups[1].Value
+          $setup = [regex]::Match((Get-Content installer/Setup.cs -Raw), 'AssemblyVersion\("(\d+\.\d+\.\d+)').Groups[1].Value
+          if ($version -ne $setup) { throw "App ($version) and installer ($setup) versions differ" }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match the app version v$version"
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Download TrustTunnel client
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "trusttunnel_client-$env:CLIENT_VERSION-windows-x86_64.zip"
+          gh release download $env:CLIENT_VERSION --repo TrustTunnel/TrustTunnelClient --pattern $zip --dir $env:RUNNER_TEMP
+          Expand-Archive (Join-Path $env:RUNNER_TEMP $zip) (Join-Path $env:RUNNER_TEMP 'client')
+          $exe = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'client') -Recurse -Filter trusttunnel_client.exe | Select-Object -First 1
+          if (-not $exe) { throw 'trusttunnel_client.exe not found in the client archive' }
+          Copy-Item (Join-Path $exe.DirectoryName '*') client -Recurse -Force
+          Get-ChildItem client
+
+      - name: Prepare signing certificate
+        if: ${{ env.HAS_CERT == 'true' }}
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+          "SIGN_PFX_PATH=$pfx" >> $env:GITHUB_ENV
+
+      - name: Build packages
+        # Windows PowerShell 5.1, the same shell the script targets locally.
+        shell: powershell
+        env:
+          SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: .\scripts\package.ps1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrustTunnelGUI-${{ env.VERSION }}
+          path: |
+            dist/installer/TrustTunnelGUI-${{ env.VERSION }}-setup.exe
+            dist/portable/TrustTunnelGUI-${{ env.VERSION }}-portable.zip
+
+      - name: Publish release
+        if: ${{ github.ref_type == 'tag' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Release notes: the section of CHANGELOG.md for this version plus checksums.
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $section = [regex]::Match($changelog, "(?ms)^## $([regex]::Escape($env:VERSION))\s*\r?\n(.*?)(?=^## |\z)").Groups[1].Value.Trim()
+          $files = @("dist/installer/TrustTunnelGUI-$env:VERSION-setup.exe", "dist/portable/TrustTunnelGUI-$env:VERSION-portable.zip")
+          $hashes = ($files | ForEach-Object { '| `{0}` | `{1}` |' -f (Split-Path $_ -Leaf), (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower() }) -join "`n"
+          $notes = "$section`n`nTrustTunnel client $env:CLIENT_VERSION is included.`n`n### SHA-256`n| File | SHA-256 |`n|---|---|`n$hashes"
+          Set-Content release-notes.md $notes -Encoding utf8
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME $files --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $files --title "TrustTunnel GUI $env:VERSION" --notes-file release-notes.md --verify-tag
+          }

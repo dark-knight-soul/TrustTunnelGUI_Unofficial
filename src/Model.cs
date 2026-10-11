@@ -28,6 +28,8 @@ namespace TrustTunnelGui
         public string Certificate = "";
         public string CertificateName = "";
         public bool Ipv6 = true;
+        public bool AntiDpi = false;
+        public bool SkipVerification = false;
 
         [ScriptIgnore]
         public string Password
@@ -71,6 +73,12 @@ namespace TrustTunnelGui
         public string SelectedServerId = "";
         public bool TrayHintShown = false;
         public bool LegacyImportDone = false;
+        public bool AutoReconnect = true;
+        public bool CheckUpdates = true;
+        public long LastUpdateCheck = 0;    // UTC ticks
+        public int Mtu = Defaults.Mtu;
+        public bool PostQuantum = true;
+        public bool ChangeSystemDns = true;
         public string Theme = "system";    // system | light | dark
         public string Language = "system"; // system | ru | en
         public bool RunAsAdmin = false;     // relaunch elevated at start
@@ -154,6 +162,8 @@ namespace TrustTunnelGui
         public static readonly string[] IncludedRoutes = { "0.0.0.0/0", "2000::/3" };
         public const int Port = 443;
         public const int Mtu = 1500;
+        public const int MinMtu = 576;
+        public const int MaxMtu = 9000;
     }
 
     static class Secret
@@ -269,7 +279,7 @@ namespace TrustTunnelGui
             Kv(sb, "loglevel", Str(settings.LogLevel == "debug" ? "debug" : "info"));
             Kv(sb, "vpn_mode", Str(profile.DefaultMode == "bypass" ? "selective" : "general"));
             Kv(sb, "killswitch_enabled", settings.KillSwitch ? "true" : "false");
-            Kv(sb, "post_quantum_group_enabled", "true");
+            Kv(sb, "post_quantum_group_enabled", settings.PostQuantum ? "true" : "false");
             Kv(sb, "exclusions", List(Exclusions(profile)));
             sb.AppendLine();
 
@@ -281,10 +291,10 @@ namespace TrustTunnelGui
             Kv(sb, "username", Str(server.Username));
             Kv(sb, "password", Str(server.Password));
             Kv(sb, "client_random", Str(server.ClientRandom.Trim()));
-            Kv(sb, "skip_verification", "false");
+            Kv(sb, "skip_verification", server.SkipVerification ? "true" : "false");
             Kv(sb, "certificate", Pem(server.Certificate));
             Kv(sb, "upstream_protocol", Str(server.Protocol == "http3" ? "http3" : "http2"));
-            Kv(sb, "anti_dpi", "false");
+            Kv(sb, "anti_dpi", server.AntiDpi ? "true" : "false");
             Kv(sb, "dns_upstreams", List(server.DnsServers));
             sb.AppendLine();
 
@@ -304,8 +314,8 @@ namespace TrustTunnelGui
             Kv(sb, "bound_if", Str(settings.TunBoundInterface ?? ""));
             Kv(sb, "included_routes", List(Defaults.IncludedRoutes));
             Kv(sb, "excluded_routes", List(settings.ExcludedRoutes));
-            Kv(sb, "mtu_size", Defaults.Mtu.ToString(CultureInfo.InvariantCulture));
-            Kv(sb, "change_system_dns", "true");
+            Kv(sb, "mtu_size", (settings.Mtu >= Defaults.MinMtu && settings.Mtu <= Defaults.MaxMtu ? settings.Mtu : Defaults.Mtu).ToString(CultureInfo.InvariantCulture));
+            Kv(sb, "change_system_dns", settings.ChangeSystemDns ? "true" : "false");
             return sb.ToString();
         }
 
@@ -601,7 +611,9 @@ namespace TrustTunnelGui
                 DnsServers = doc.GetList("endpoint", "dns_upstreams"),
                 ClientRandom = doc.GetString("endpoint", "client_random"),
                 Certificate = doc.GetString("endpoint", "certificate").Trim(),
-                Ipv6 = doc.GetBool("endpoint", "has_ipv6", true)
+                Ipv6 = doc.GetBool("endpoint", "has_ipv6", true),
+                AntiDpi = doc.GetBool("endpoint", "anti_dpi", false),
+                SkipVerification = doc.GetBool("endpoint", "skip_verification", false)
             };
             server.Password = doc.GetString("endpoint", "password");
             if (server.Address.EndsWith(":" + Defaults.Port)) server.Address = server.Address.Substring(0, server.Address.Length - 4);

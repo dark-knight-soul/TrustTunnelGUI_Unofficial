@@ -23,6 +23,7 @@ namespace TrustTunnelGui
             if (args.Length >= 3 && args[0] == "--test-stop") { TestStop(args[1], args[2]); return true; }
             if (args.Length >= 3 && args[0] == "--test-config") { TestConfig(args[1], args[2]); return true; }
             if (args.Length >= 3 && args[0] == "--test-vpn") { TestVpn(args[1], args[2]); return true; }
+            if (args.Length >= 2 && args[0] == "--test-features") { TestFeatures(args[1]); return true; }
             if (args.Length >= 2 && args[0] == "--print-paths")
             {
                 File.WriteAllText(args[1], "portable=" + App.IsPortable + "\nbase=" + App.BaseDir + "\nclient=" + App.ClientExe +
@@ -143,6 +144,94 @@ namespace TrustTunnelGui
             }
         }
 
+        static readonly string[] SampleQueryLines =
+        {
+            "11.10.2026 15:00:00.000001 DEBUG [100] TCPIP_HANDLER handle: [0] [L:7-R:9] New client connection request: 10.0.0.2:51000->142.250.74.46:443 (proto: TCP)",
+            "11.10.2026 15:00:00.000002 DEBUG [100] VPNCORE lookup: [0] [L:7-R:9] Found domain in SNI data: www.google.com",
+            "11.10.2026 15:00:00.000003 DEBUG [100] VPNCORE route: [0] [L:7-R:9] Final action: VPN_FCA_TUNNEL",
+            "11.10.2026 15:00:00.000004 DEBUG [100] TCPIP_HANDLER handle: [0] [L:8-R:10] New client connection request: 10.0.0.2:51001->[2a00:1450::1]:443 (proto: UDP)",
+            "11.10.2026 15:00:00.000005 DEBUG [100] VPNCORE route: [0] [L:8-R:10] Final action: VPN_FCA_BYPASS",
+            "11.10.2026 15:00:00.000006 DEBUG [100] VPNCORE lookup: [0] [L:8-R:10] Found domain in DNS data: youtube.com",
+            "11.10.2026 15:00:00.000007 DEBUG [100] VPNCORE close: [0] [L:7-R:9] Destroyed (download=20480, upload=1024)",
+            "11.10.2026 15:00:00.000008 DEBUG [100] VPNCORE route: [0] [L:11-R:12] New client connection request: 127.0.0.1:5000->ads.example.com:443 (proto: TCP)",
+            "11.10.2026 15:00:00.000009 DEBUG [100] VPNCORE route: [0] [L:11-R:12] Final action: VPN_FCA_REJECT",
+            "11.10.2026 15:00:00.000010 DEBUG [100] VPNCORE route: [0] [L:99-R:99] Final action: VPN_FCA_TUNNEL"
+        };
+
+        static void TestFeatures(string outDir)
+        {
+            var sb = new StringBuilder();
+            L.Apply("ru");
+
+            // 1. Connection log parser.
+            var parser = new QueryLogParser();
+            var rows = new List<QueryEntry>();
+            parser.Added += rows.Add;
+            foreach (var line in SampleQueryLines) parser.Feed(line);
+            sb.AppendLine("query rows: " + rows.Count);
+            foreach (var r in rows) sb.AppendLine("  " + r.Title + " | " + r.Subtitle + " | " + r.Action + " (" + r.ActionText + ")");
+
+            // 2. Backup: export with password, wrong password, import (add + replace).
+            var data = new AppData();
+            data.Profiles.Add(new RoutingProfile { Id = RoutingProfile.DefaultId, Name = "", BypassRules = new List<string> { "local.lan" } });
+            var work = new RoutingProfile { Name = "Работа", DefaultMode = "bypass", VpnRules = new List<string> { "corp.example.com" } };
+            data.Profiles.Add(work);
+            var s1 = new ServerInfo { Name = "A", Address = "1.2.3.4", Domain = "a.example.com", Username = "u1", RoutingProfileId = work.Id, AntiDpi = true };
+            s1.Password = "p@ss\"1";
+            var s2 = new ServerInfo { Name = "B", Address = "b.example.com:8443", Domain = "b.example.com", Username = "u2" };
+            s2.Password = "secret2";
+            data.Servers.Add(s1);
+            data.Servers.Add(s2);
+            var file = Path.Combine(outDir, "backup_test.ttgui.json");
+            Backup.Export(data, file, "backup-pass");
+            var raw = File.ReadAllText(file);
+            sb.AppendLine("backup contains plain password: " + (raw.Contains("p@ss") || raw.Contains("secret2")));
+            var read = Backup.Read(file);
+            try { Backup.Passwords(read, "wrong"); sb.AppendLine("wrong password: accepted (BAD)"); }
+            catch (BackupException ex) { sb.AppendLine("wrong password: " + ex.Message); }
+            var passwords = Backup.Passwords(read, "backup-pass");
+            sb.AppendLine("decrypted passwords: " + passwords.Count);
+
+            var target = new AppData();
+            target.Profiles.Add(new RoutingProfile { Id = RoutingProfile.DefaultId, Name = "" });
+            target.Servers.Add(new ServerInfo { Name = "A", Address = "9.9.9.9" });
+            int added = Backup.Apply(target, read, passwords, false);
+            sb.AppendLine("add mode: imported=" + added + " servers=" + string.Join(", ", target.Servers.Select(x => x.Name + "/" + x.Password + "/" + (target.Profiles.First(p => p.Id == x.RoutingProfileId).DisplayName) + "/antiDpi=" + x.AntiDpi)));
+            sb.AppendLine("add mode: default bypass rules=" + string.Join(",", target.Profiles.First(p => p.IsDefault).BypassRules));
+            int replaced = Backup.Apply(target, read, new Dictionary<string, string>(), true);
+            sb.AppendLine("replace mode: imported=" + replaced + " servers=" + string.Join(", ", target.Servers.Select(x => x.Name + "/pass=" + (x.Password.Length > 0))) + " profiles=" + target.Profiles.Count);
+            File.WriteAllText(Path.Combine(outDir, "backup_test_raw.txt"), raw.Length > 600 ? raw.Substring(0, 600) : raw);
+
+            // 3. Ping.
+            sb.AppendLine("ping client.lideropt.uz: " + PingService.Measure("client.lideropt.uz"));
+            sb.AppendLine("ping 127.0.0.1:1 (closed): " + PingService.Measure("127.0.0.1:1"));
+            string host; int port;
+            foreach (var a in new[] { "1.2.3.4", "h.example.com:8443", "[2001:db8::1]:443", "2001:db8::1" })
+            {
+                PingService.SplitAddress(a, out host, out port);
+                sb.AppendLine("split " + a + " -> " + host + " " + port);
+            }
+
+            // 4. Update check against the published releases.
+            try
+            {
+                var release = UpdateChecker.Latest();
+                sb.AppendLine("latest release: " + release.Tag + " newer than " + App.Version + ": " + UpdateChecker.IsNewer(release) + " url=" + release.Url);
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("update check failed: " + ex.Message);
+            }
+
+            // 5. Config with advanced options.
+            var adv = new AppSettings { Mtu = 1280, PostQuantum = false, ChangeSystemDns = false };
+            var cfg = ConfigBuilder.Build(s1, work, adv);
+            foreach (var key in new[] { "post_quantum_group_enabled", "anti_dpi", "skip_verification", "mtu_size", "change_system_dns" })
+                sb.AppendLine("config " + cfg.Split('\n').First(l => l.StartsWith(key)).Trim());
+
+            File.WriteAllText(Path.Combine(outDir, "test_features.txt"), sb.ToString(), new UTF8Encoding(false));
+        }
+
         static void TestStop(string toml, string resultFile)
         {
             var sb = new StringBuilder();
@@ -187,6 +276,9 @@ namespace TrustTunnelGui
             app.Store = new Store(Path.Combine(dataDir, "data.json"));
             app.Store.Data.Settings.LegacyImportDone = true;
             app.Vpn = new VpnManager(App.ClientExe, Path.Combine(dataDir, "c.toml"), Path.Combine(app.LogDir, "client.log"), app.Dispatcher);
+            app.Ping = new PingService(app.Dispatcher);
+            // Sample servers use made-up addresses: never ping them from screenshots.
+            typeof(PingService).GetField("_lastRun", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(app.Ping, DateTime.MaxValue.AddDays(-1));
 
             var w = new MainWindow { Left = -20000, Top = -20000, ShowActivated = false, ShowInTaskbar = false };
             app.Window = w;
@@ -280,6 +372,34 @@ namespace TrustTunnelGui
             }));
             steps.Add(Step("25_servers_socks_banner", delegate { SetVpnState(app.Vpn, VpnState.Connected, app.Store.Data.Servers[0].Id); w.SelectTab(0); }));
             steps.Add(Step("26_admin_dialog", delegate { app.Store.Data.Settings.ListenerMode = "tun"; app.Store.Data.Settings.SocksAllowLan = false; SetVpnState(app.Vpn, VpnState.Disconnected, null); w.SelectTab(0); w.ShowDialog(L.AdminRequired, UI.BodyMedium(L.AdminRequiredDescription), DialogAction.Cancel(), new DialogAction(L.Restart, delegate { return true; })); }));
+            steps.Add(Step("27_query_log", delegate
+            {
+                w.CloseDialog();
+                var feed = typeof(VpnManager).GetMethod("HandleLine", BindingFlags.NonPublic | BindingFlags.Instance);
+                foreach (var line in SampleQueryLines) feed.Invoke(app.Vpn, new object[] { line });
+                w.SelectTab(2);
+                w.Push(new QueryLogPage(w));
+            }));
+            steps.Add(Step("28_backup", delegate { w.SelectTab(2); w.Push(new BackupPage(w)); }));
+            steps.Add(Step("29_server_advanced", delegate
+            {
+                w.SelectTab(0);
+                app.Store.Data.Servers[0].SkipVerification = true;
+                w.Push(new ServerDetailsPage(w, app.Store.Data.Servers[0]));
+                var sv = Find<System.Windows.Controls.ScrollViewer>(w.TopPage);
+                if (sv != null) sv.ScrollToEnd();
+            }));
+            steps.Add(Step("29b_servers_ping", delegate
+            {
+                var results = (Dictionary<string, int>)typeof(PingService).GetField("_results", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(app.Ping);
+                var list = app.Store.Data.Servers;
+                results[list[0].Id] = 38;
+                results[list[1].Id] = 212;
+                results[list[2].Id] = PingService.Unreachable;
+                typeof(PingService).GetField("_lastRun", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(app.Ping, DateTime.UtcNow);
+                w.SelectTab(0);
+            }));
+            steps.Add(Step("29c_launch", delegate { w.SelectTab(2); w.Push(new LaunchAndConnectionPage(w)); }));
             steps.Add(Step("30_dark_servers", delegate
             {
                 w.CloseDialog();

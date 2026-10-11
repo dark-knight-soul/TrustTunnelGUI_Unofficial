@@ -48,6 +48,18 @@ function Invoke-Csc([string]$Out, [string]$Manifest, [string[]]$Sources, [string
     Write-Host "  built $Out"
 }
 
+# Optional Authenticode signing: set SIGN_PFX_PATH (and SIGN_PFX_PASSWORD) to sign the executables.
+function Invoke-Sign([string]$File) {
+    if (-not $env:SIGN_PFX_PATH) { return }
+    $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+    $signtool = Get-ChildItem $kits -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+    if (-not $signtool) { throw 'signtool.exe not found: install the Windows SDK' }
+    & $signtool.FullName sign /f $env:SIGN_PFX_PATH /p $env:SIGN_PFX_PASSWORD /fd SHA256 /tr 'http://timestamp.digicert.com' /td SHA256 /d 'TrustTunnel GUI' $File
+    if ($LASTEXITCODE -ne 0) { throw "Signing of $(Split-Path $File -Leaf) failed" }
+    Write-Host "  signed $File"
+}
+
 function New-Zip([string]$Source, [string]$Zip, [bool]$IncludeBaseDirectory) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     if (Test-Path $Zip) { Remove-Item $Zip -Force }
@@ -80,6 +92,7 @@ foreach ($f in $clientFiles) {
 # 1. Application
 $appExe = Join-Path $obj 'TrustTunnelGUI.exe'
 Invoke-Csc $appExe (Join-Path $root 'src\app.manifest') $appSources @($iconResource) $null
+Invoke-Sign $appExe
 
 # 2. Portable: app + client + "portable" marker (data stays in .\data)
 $name = "TrustTunnelGUI-$version-portable"
@@ -108,7 +121,9 @@ New-Zip $payloadDir $payloadZip $false
 
 $installerDir = Join-Path $dist 'installer'
 New-Item -ItemType Directory -Force $installerDir | Out-Null
-Invoke-Csc (Join-Path $installerDir "TrustTunnelGUI-$version-setup.exe") (Join-Path $root 'installer\setup.manifest') $setupSources @($iconResource, "$payloadZip,payload.zip") $null
+$setupExe = Join-Path $installerDir "TrustTunnelGUI-$version-setup.exe"
+Invoke-Csc $setupExe (Join-Path $root 'installer\setup.manifest') $setupSources @($iconResource, "$payloadZip,payload.zip") $null
+Invoke-Sign $setupExe
 
 Write-Host ""
 Get-Item $portableZip, (Join-Path $installerDir "TrustTunnelGUI-$version-setup.exe") | ForEach-Object { '{0,-45} {1,8:N1} MB' -f $_.Name, ($_.Length / 1MB) }
