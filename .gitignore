@@ -1,9 +1,11 @@
-# Only the GUI sources are versioned; the TrustTunnel client binaries come from its release archive.
-/*
-!/.gitignore
-!/README.md
-!/LICENSE
-!/gui/
+# Build output (scripts\build.cmd)
+/dist/
 
-gui/*.exe
-gui/*.pdb
+# TrustTunnel console client release files: download them into client\ (see client\README.md)
+/client/*
+!/client/README.md
+
+# Editors
+.vs/
+.vscode/
+*.user

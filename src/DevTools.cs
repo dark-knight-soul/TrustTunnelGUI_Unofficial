@@ -23,6 +23,12 @@ namespace TrustTunnelGui
             if (args.Length >= 3 && args[0] == "--test-stop") { TestStop(args[1], args[2]); return true; }
             if (args.Length >= 3 && args[0] == "--test-config") { TestConfig(args[1], args[2]); return true; }
             if (args.Length >= 3 && args[0] == "--test-vpn") { TestVpn(args[1], args[2]); return true; }
+            if (args.Length >= 2 && args[0] == "--print-paths")
+            {
+                File.WriteAllText(args[1], "portable=" + App.IsPortable + "\nbase=" + App.BaseDir + "\nclient=" + App.ClientExe +
+                    " exists=" + File.Exists(App.ClientExe) + "\ndata=" + App.DataDir + "\n");
+                return true;
+            }
             return false;
         }
 

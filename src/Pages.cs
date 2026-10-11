@@ -1244,7 +1244,7 @@ namespace TrustTunnelGui
             desc.Margin = new Thickness(0, 6, 0, 20);
             sp.Children.Add(desc);
 
-            sp.Children.Add(VersionRow(L.GuiVersion, UI.BodyMedium(App.Version, C.NeutralDark)));
+            sp.Children.Add(VersionRow(L.GuiVersion, UI.BodyMedium(App.Version + (App.IsPortable ? " (portable)" : ""), C.NeutralDark)));
             sp.Children.Add(VersionRow(L.ClientVersion, _clientVersion));
 
             var links = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 20, 0, 0) };

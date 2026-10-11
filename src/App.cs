@@ -20,8 +20,8 @@ using WinForms = System.Windows.Forms;
 
 [assembly: AssemblyTitle("TrustTunnel GUI")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace TrustTunnelGui
 {
@@ -149,19 +149,29 @@ namespace TrustTunnelGui
             if (_tray != null) _tray.Update();
         }
 
+        public static bool IsPortable;
+
         public static void InitPaths()
         {
             ExePath = Assembly.GetExecutingAssembly().Location;
-            BaseDir = Path.GetDirectoryName(ExePath);
-            ClientExe = Path.Combine(BaseDir, "trusttunnel_client.exe");
-            if (!File.Exists(ClientExe))
+            var exeDir = Path.GetDirectoryName(ExePath);
+
+            // The client is shipped next to the exe; development builds also find it in a "client" folder up the tree.
+            BaseDir = exeDir;
+            var dir = exeDir;
+            for (int level = 0; level < 4 && dir != null; level++, dir = Path.GetDirectoryName(dir))
             {
-                var parent = Path.GetDirectoryName(BaseDir);
-                if (parent != null && File.Exists(Path.Combine(parent, "trusttunnel_client.exe"))) BaseDir = parent;
-                ClientExe = Path.Combine(BaseDir, "trusttunnel_client.exe");
+                if (File.Exists(Path.Combine(dir, "trusttunnel_client.exe"))) { BaseDir = dir; break; }
+                if (File.Exists(Path.Combine(dir, "client", "trusttunnel_client.exe"))) { BaseDir = Path.Combine(dir, "client"); break; }
             }
+            ClientExe = Path.Combine(BaseDir, "trusttunnel_client.exe");
             WizardExe = Path.Combine(BaseDir, "setup_wizard.exe");
-            DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TrustTunnelGUI");
+
+            // Portable build: a "portable" marker file next to the exe keeps all data in .\data.
+            IsPortable = File.Exists(Path.Combine(exeDir, "portable"));
+            DataDir = IsPortable
+                ? Path.Combine(exeDir, "data")
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TrustTunnelGUI");
         }
 
         // Returns false when the app restarted itself elevated and this instance should not run.
