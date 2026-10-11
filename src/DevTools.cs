@@ -24,6 +24,7 @@ namespace TrustTunnelGui
             if (args.Length >= 3 && args[0] == "--test-config") { TestConfig(args[1], args[2]); return true; }
             if (args.Length >= 3 && args[0] == "--test-vpn") { TestVpn(args[1], args[2]); return true; }
             if (args.Length >= 2 && args[0] == "--test-features") { TestFeatures(args[1]); return true; }
+            if (args.Length >= 3 && args[0] == "--test-ping-ui") { TestPingUi(args[1], args[2]); return true; }
             if (args.Length >= 2 && args[0] == "--print-paths")
             {
                 File.WriteAllText(args[1], "portable=" + App.IsPortable + "\nbase=" + App.BaseDir + "\nclient=" + App.ClientExe +
@@ -469,6 +470,90 @@ namespace TrustTunnelGui
             };
             app.Dispatcher.BeginInvoke(next, DispatcherPriority.ApplicationIdle);
             app.Run();
+        }
+
+        // Opens the servers page with one real address, presses the ping button and records the subtitle over time.
+        static void TestPingUi(string address, string outDir)
+        {
+            Directory.CreateDirectory(outDir);
+            var dataDir = Path.Combine(outDir, "ping-data");
+            if (Directory.Exists(dataDir)) Directory.Delete(dataDir, true);
+            App.DataDir = dataDir;
+            var app = new App();
+            App.I = app;
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            Theme.Install(app, "light");
+            L.Apply("ru");
+            app.LogDir = Path.Combine(dataDir, "logs");
+            Directory.CreateDirectory(app.LogDir);
+            app.Store = new Store(Path.Combine(dataDir, "data.json"));
+            app.Store.Data.Settings.LegacyImportDone = true;
+            app.Store.Data.Servers.Add(new ServerInfo { Name = "Test", Address = address, Domain = "test" });
+            app.Vpn = new VpnManager(App.ClientExe, Path.Combine(dataDir, "c.toml"), Path.Combine(app.LogDir, "client.log"), app.Dispatcher);
+            app.Ping = new PingService(app.Dispatcher);
+            var w = new MainWindow { Left = -20000, Top = -20000, ShowActivated = false, ShowInTaskbar = false };
+            app.Window = w;
+            w.Show();
+            var log = new StringBuilder();
+            Func<string> subtitle = delegate
+            {
+                var texts = new List<string>();
+                CollectTexts((FrameworkElement)w.TopPage, texts);
+                return string.Join(" | ", texts.Where(t => t.Contains(address)));
+            };
+            var t0 = DateTime.Now;
+            Action<string> note = delegate(string what) { log.AppendLine(((int)(DateTime.Now - t0).TotalMilliseconds).ToString().PadLeft(5) + " ms  " + what + ": " + subtitle()); };
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            int tick = 0;
+            timer.Tick += delegate
+            {
+                tick++;
+                if (tick == 1) note("page opened");
+                if (tick == 16)
+                {
+                    note("before click");
+                    var button = FindAll<System.Windows.Controls.Button>(w.TopPage).First(b => b.ToolTip is string && ((string)b.ToolTip).StartsWith(L.PingServers));
+                    log.AppendLine("button tooltip before click: " + button.ToolTip);
+                    button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                }
+                if (tick == 17)
+                {
+                    note("right after click");
+                    var b = FindAll<System.Windows.Controls.Button>(w.TopPage).First(x => x.ToolTip is string && ((string)x.ToolTip).StartsWith(L.PingRunning.TrimEnd('…')));
+                    log.AppendLine("button while running: enabled=" + b.IsEnabled + " tooltip=" + b.ToolTip);
+                }
+                if (tick == 18) Capture((FrameworkElement)w.Content, Path.Combine(outDir, "ping_after_click.png"));
+                if (tick == 30)
+                {
+                    note("3 s after click");
+                    Capture((FrameworkElement)w.Content, Path.Combine(outDir, "ping_result.png"));
+                    timer.Stop();
+                    File.WriteAllText(Path.Combine(outDir, "ping_ui.txt"), log.ToString(), new UTF8Encoding(false));
+                    w.AllowClose = true;
+                    w.Close();
+                    app.Shutdown();
+                }
+            };
+            timer.Start();
+            app.Run();
+        }
+
+        static void CollectTexts(DependencyObject d, List<string> texts)
+        {
+            var tb = d as System.Windows.Controls.TextBlock;
+            if (tb != null && tb.IsVisible)
+                texts.Add(new System.Windows.Documents.TextRange(tb.ContentStart, tb.ContentEnd).Text);
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++) CollectTexts(VisualTreeHelper.GetChild(d, i), texts);
+        }
+
+        static IEnumerable<T> FindAll<T>(DependencyObject d) where T : DependencyObject
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++)
+            {
+                var c = VisualTreeHelper.GetChild(d, i);
+                if (c is T) yield return (T)c;
+                foreach (var x in FindAll<T>(c)) yield return x;
+            }
         }
 
         static KeyValuePair<string, Action> Step(string name, Action a)

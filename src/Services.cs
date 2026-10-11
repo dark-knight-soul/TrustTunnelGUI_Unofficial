@@ -16,6 +16,7 @@ namespace TrustTunnelGui
     {
         public const int Unreachable = -1;
         const int TimeoutMs = 3000;
+        const int MinVisibleMs = 600;
 
         public event Action Updated;
 
@@ -41,6 +42,11 @@ namespace TrustTunnelGui
             return _running.Contains(serverId);
         }
 
+        public bool AnyRunning { get { return _running.Count > 0; } }
+
+        // Local time of the last completed check, or null.
+        public DateTime? LastChecked { get; private set; }
+
         public void PingAllIfStale(IEnumerable<ServerInfo> servers, TimeSpan maxAge)
         {
             if (DateTime.UtcNow - _lastRun > maxAge) PingAll(servers);
@@ -57,11 +63,16 @@ namespace TrustTunnelGui
                 _running.Add(id);
                 ThreadPool.QueueUserWorkItem(delegate
                 {
+                    var sw = Stopwatch.StartNew();
                     int ms = Measure(address);
+                    // A fast server answers in ~20 ms; keep the progress visible long enough to be noticed.
+                    var left = MinVisibleMs - (int)sw.ElapsedMilliseconds;
+                    if (left > 0) Thread.Sleep(left);
                     _ui.BeginInvoke(new Action(delegate
                     {
                         _running.Remove(id);
                         _results[id] = ms;
+                        LastChecked = DateTime.Now;
                         if (Updated != null) Updated();
                     }));
                 });

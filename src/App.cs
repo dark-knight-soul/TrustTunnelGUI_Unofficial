@@ -20,8 +20,8 @@ using WinForms = System.Windows.Forms;
 
 [assembly: AssemblyTitle("TrustTunnel GUI")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
 
 namespace TrustTunnelGui
 {
@@ -726,8 +726,12 @@ namespace TrustTunnelGui
             }
         }
 
+        bool _disposed;
+
         public void Update()
         {
+            // The client may report its exit after the tray was removed on quit.
+            if (_disposed) return;
             var vpn = _app.Vpn;
             string status;
             switch (vpn.State)
@@ -808,6 +812,8 @@ namespace TrustTunnelGui
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
             _icon.Visible = false;
             _icon.Dispose();
             _menu.Dispose();

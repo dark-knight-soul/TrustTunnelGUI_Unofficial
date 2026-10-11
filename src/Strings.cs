@@ -117,6 +117,8 @@ namespace TrustTunnelGui
         public static string EnableDebug = "Включить";
 
         public static string PingServers = "Проверить пинг";
+        public static string PingRunning = "Проверка пинга…";
+        public static string PingLastChecked = "Проверить пинг (последняя проверка: {0})";
         public static string Unreachable = "недоступен";
         public static string PingMs = "{0} мс";
         public static string Reconnecting = "Переподключение…";
@@ -324,7 +326,7 @@ namespace TrustTunnelGui
             { "ClientLogEmptyDescription", "The console client log is shown here. Connect to your server to add the first records" },
             { "Blocked", "Blocked" }, { "Search", "Search" },
             { "QueryLogNeedsDebug", "The client reports connections only with the Debug logging level" }, { "EnableDebug", "Enable" },
-            { "PingServers", "Check ping" }, { "Unreachable", "unreachable" }, { "PingMs", "{0} ms" },
+            { "PingServers", "Check ping" }, { "PingRunning", "Checking ping…" }, { "PingLastChecked", "Check ping (last check: {0})" }, { "Unreachable", "unreachable" }, { "PingMs", "{0} ms" },
             { "Reconnecting", "Reconnecting…" }, { "ReconnectingIn", "Connection lost. Reconnecting in {0} s" },
             { "ReconnectGaveUp", "Could not restore the connection" }, { "AutoReconnect", "Auto-reconnect" },
             { "AutoReconnectDescription", "Restore the connection if the client stops unexpectedly" },

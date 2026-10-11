@@ -20,9 +20,33 @@ namespace TrustTunnelGui
     {
         readonly ScrollViewer _scroll = UI.Scroll(null);
 
+        readonly Button _pingButton;
+
         public ServersPage(MainWindow main) : base(main)
         {
-            SetAppBar(L.Servers, null, UI.IconButton(Icons.Speed, L.PingServers, delegate { App.I.Ping.PingAll(App.I.Store.Data.Servers); }));
+            _pingButton = UI.IconButton(Icons.Speed, L.PingServers, delegate { App.I.Ping.PingAll(App.I.Store.Data.Servers); });
+            SetAppBar(L.Servers, null, _pingButton);
+        }
+
+        // Spinning, disabled while measuring; the tooltip tells when the last check finished.
+        void UpdatePingButton()
+        {
+            var ping = App.I.Ping;
+            bool running = ping.AnyRunning;
+            _pingButton.IsEnabled = !running;
+            _pingButton.Visibility = App.I.Store.Data.Servers.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            var icon = UI.Icon(running ? Icons.Update : Icons.Speed, 24, C.NeutralBlack);
+            if (running)
+            {
+                var rotate = new RotateTransform();
+                icon.RenderTransform = rotate;
+                icon.RenderTransformOrigin = new Point(0.5, 0.5);
+                rotate.BeginAnimation(RotateTransform.AngleProperty,
+                    new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1)) { RepeatBehavior = RepeatBehavior.Forever });
+            }
+            _pingButton.Content = icon;
+            _pingButton.ToolTip = running ? L.PingRunning
+                : ping.LastChecked.HasValue ? string.Format(L.PingLastChecked, ping.LastChecked.Value.ToString("HH:mm:ss")) : L.PingServers;
         }
 
         public override void OnShown()
@@ -53,7 +77,7 @@ namespace TrustTunnelGui
             var ping = App.I.Ping;
             var ms = ping.Result(s.Id);
             brush = C.NeutralLight;
-            if (ping.IsRunning(s.Id) && !ms.HasValue) { text = " · …"; return; }
+            if (ping.IsRunning(s.Id)) { text = " · …"; return; }
             if (!ms.HasValue) { text = null; return; }
             if (ms.Value == PingService.Unreachable) { text = " · " + L.Unreachable; brush = C.Error; return; }
             text = " · " + string.Format(L.PingMs, ms.Value);
@@ -62,6 +86,7 @@ namespace TrustTunnelGui
 
         void Render()
         {
+            UpdatePingButton();
             var servers = App.I.Store.Data.Servers;
             if (servers.Count == 0)
             {
