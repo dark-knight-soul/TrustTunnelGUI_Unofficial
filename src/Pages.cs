@@ -1020,6 +1020,10 @@ namespace TrustTunnelGui
         readonly TextBlock _lanInfo = UI.BodyMedium("", C.NeutralDark);
         readonly DropdownField _adapter = new DropdownField(L.SocksAdapter);
         readonly FrameworkElement _adapterPanel;
+        readonly StackPanel _tunPanel = new StackPanel();
+        readonly DropdownField _tunAdapter = new DropdownField(L.TunAdapter);
+        readonly TextBlock _tunInfo = UI.BodyMedium("", C.NeutralDark);
+        List<NetAdapter> _outbound = new List<NetAdapter>();
         readonly Button _save;
         List<NetAdapter> _adapters = new List<NetAdapter>();
         System.Windows.Controls.Primitives.ToggleButton _lan;
@@ -1037,6 +1041,24 @@ namespace TrustTunnelGui
             _socks = Tiles.Radio(L.ModeSocks, L.ModeSocksDescription, "listener", s.IsSocks, delegate { Update(); });
             list.Children.Add(_tun);
             list.Children.Add(_socks);
+
+            // TUN: adapter used for the connection to the server (bound_if).
+            _tunPanel.Children.Add(Tiles.Section(L.ModeTun));
+            var tunForm = new StackPanel { Margin = new Thickness(16, 8, 16, 0) };
+            var tunRow = new DockPanel();
+            var tunRefresh = UI.IconButton(Icons.Update, L.RefreshAdapters, delegate { LoadOutbound(_tunAdapter.SelectedKey); Update(); });
+            tunRefresh.VerticalAlignment = VerticalAlignment.Bottom;
+            tunRefresh.Margin = new Thickness(8, 0, 0, 21);
+            DockPanel.SetDock(tunRefresh, Dock.Right);
+            tunRow.Children.Add(tunRefresh);
+            tunRow.Children.Add(_tunAdapter);
+            tunForm.Children.Add(tunRow);
+            _tunPanel.Children.Add(UI.MaxWidthLeft(tunForm, 640));
+            _tunInfo.Margin = new Thickness(16, 0, 16, 12);
+            _tunPanel.Children.Add(_tunInfo);
+            list.Children.Add(_tunPanel);
+            LoadOutbound(s.TunAdapterId);
+            _tunAdapter.Changed += Update;
 
             _socksPanel.Children.Add(Tiles.Section(L.SocksSection));
             var form = new StackPanel { Margin = new Thickness(16, 8, 16, 0) };
@@ -1097,10 +1119,24 @@ namespace TrustTunnelGui
             _adapter.SetItems(items, selectedId ?? "");
         }
 
+        void LoadOutbound(string selectedId)
+        {
+            _outbound = Net.OutboundAdapters();
+            var items = new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("", L.TunAdapterAuto) };
+            items.AddRange(_outbound.Select(a => new KeyValuePair<string, string>(a.Id, a.Label)));
+            var saved = App.I.Store.Data.Settings;
+            if (!string.IsNullOrEmpty(selectedId) && _outbound.All(a => a.Id != selectedId))
+            {
+                var name = selectedId == saved.TunAdapterId && saved.TunAdapterName.Length > 0 ? saved.TunAdapterName : selectedId;
+                items.Add(new KeyValuePair<string, string>(selectedId, string.Format(L.AdapterUnavailableItem, name)));
+            }
+            _tunAdapter.SetItems(items, selectedId ?? "");
+        }
+
         string Snapshot()
         {
-            return string.Join("\u0001", _socks.IsChecked == true ? "socks" : "tun", _port.Value, _lan != null && _lan.IsChecked == true ? "1" : "0",
-                _adapter.SelectedKey ?? "", _username.Value, _password.Value);
+            return string.Join("\u0001", _socks.IsChecked == true ? "socks" : "tun", _tunAdapter.SelectedKey ?? "", _port.Value,
+                _lan != null && _lan.IsChecked == true ? "1" : "0", _adapter.SelectedKey ?? "", _username.Value, _password.Value);
         }
 
         public override bool IsDirty { get { return Snapshot() != _initial; } }
@@ -1111,6 +1147,11 @@ namespace TrustTunnelGui
             bool socks = _socks.IsChecked == true;
             _socksPanel.IsEnabled = socks;
             _socksPanel.Opacity = socks ? 1 : 0.5;
+            _tunPanel.IsEnabled = !socks;
+            _tunPanel.Opacity = socks ? 0.5 : 1;
+            var tunKey = _tunAdapter.SelectedKey ?? "";
+            if (tunKey.Length == 0) _tunInfo.Text = L.TunAdapterAutoHint;
+            else _tunInfo.Text = _outbound.Any(a => a.Id == tunKey) ? L.TunAdapterHint : L.TunAdapterUnavailable;
             bool lan = _lan.IsChecked == true;
             _adapterPanel.Visibility = lan ? Visibility.Visible : Visibility.Collapsed;
             int port;
@@ -1157,6 +1198,10 @@ namespace TrustTunnelGui
 
             var s = App.I.Store.Data.Settings;
             s.ListenerMode = socks ? "socks" : "tun";
+            var tunId = _tunAdapter.SelectedKey ?? "";
+            var tunAdapter = _outbound.FirstOrDefault(a => a.Id == tunId);
+            if (tunId != s.TunAdapterId || tunAdapter != null) s.TunAdapterName = tunAdapter != null ? tunAdapter.Name : "";
+            s.TunAdapterId = tunId;
             if (portOk) s.SocksPort = port;
             s.SocksAllowLan = _lan.IsChecked == true;
             var adapterId = _adapter.SelectedKey ?? "";
@@ -1180,6 +1225,8 @@ namespace TrustTunnelGui
         public string Description;
         public string Ip;
         public bool IsVirtual;
+        public int Index;        // IPv4 interface index, as in "route print"
+        public bool HasGateway;  // can reach the internet on its own
 
         public string Label { get { return Name + " — " + Ip; } }
     }
@@ -1202,6 +1249,9 @@ namespace TrustTunnelGui
                         .Select(a => a.Address)
                         .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !a.ToString().StartsWith("169.254."));
                     if (ip == null) continue;
+                    var props = nic.GetIPProperties();
+                    int index = 0;
+                    try { var v4 = props.GetIPv4Properties(); if (v4 != null) index = v4.Index; } catch { }
                     result.Add(new NetAdapter
                     {
                         Id = nic.Id,
@@ -1209,12 +1259,27 @@ namespace TrustTunnelGui
                         Description = nic.Description,
                         Ip = ip.ToString(),
                         IsVirtual = nic.Description.IndexOf("virtual", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    nic.Description.IndexOf("hyper-v", StringComparison.OrdinalIgnoreCase) >= 0
+                                    nic.Description.IndexOf("hyper-v", StringComparison.OrdinalIgnoreCase) >= 0,
+                        Index = index,
+                        HasGateway = props.GatewayAddresses.Any(g =>
+                            g.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !g.Address.Equals(System.Net.IPAddress.Any))
                     });
                 }
             }
             catch { }
             return result;
+        }
+
+        // Adapters that can carry the tunnel to the server (have an IPv4 gateway and an interface index).
+        public static List<NetAdapter> OutboundAdapters()
+        {
+            return Adapters().Where(a => a.HasGateway && a.Index > 0).ToList();
+        }
+
+        public static int? OutboundIndex(string id)
+        {
+            var adapter = OutboundAdapters().FirstOrDefault(a => a.Id == id);
+            return adapter == null ? (int?)null : adapter.Index;
         }
 
         public static string AdapterIp(string id)

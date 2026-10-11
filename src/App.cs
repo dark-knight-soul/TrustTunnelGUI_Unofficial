@@ -20,8 +20,8 @@ using WinForms = System.Windows.Forms;
 
 [assembly: AssemblyTitle("TrustTunnel GUI")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace TrustTunnelGui
 {
@@ -294,6 +294,11 @@ namespace TrustTunnelGui
             if (Store.Data.Settings.SocksAdapterMissing)
             {
                 OnVpnFailed(L.AdapterUnavailable);
+                return;
+            }
+            if (Store.Data.Settings.TunAdapterMissing)
+            {
+                OnVpnFailed(L.TunAdapterUnavailable);
                 return;
             }
             // TUN needs an elevated client; SOCKS mode works with normal rights.

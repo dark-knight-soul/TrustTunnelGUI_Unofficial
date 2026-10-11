@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/badges/version.svg" alt="version 1.1.0">
+  <img src="docs/badges/version.svg" alt="version 1.2.0">
   <img src="docs/badges/windows.svg" alt="Windows 10 | 11">
   <img src="docs/badges/dotnet.svg" alt=".NET Framework 4.8">
   <img src="docs/badges/license.svg" alt="license Apache-2.0">
@@ -61,8 +61,8 @@
 
 | Вариант | Файл | Для чего |
 |---|---|---|
-| **Установщик** | `TrustTunnelGUI-1.1.0-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
-| **Portable** | `TrustTunnelGUI-1.1.0-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
+| **Установщик** | `TrustTunnelGUI-1.2.0-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
+| **Portable** | `TrustTunnelGUI-1.2.0-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
 
 Нужна Windows 10 или 11 (x64); .NET Framework 4.8 уже входит в систему.
 
@@ -74,7 +74,7 @@
 Установщик поддерживает тихий режим для автоматизации:
 
 ```bat
-TrustTunnelGUI-1.1.0-setup.exe --silent
+TrustTunnelGUI-1.2.0-setup.exe --silent
 "C:\Program Files\TrustTunnel GUI\uninstall.exe" --uninstall --silent
 ```
 
@@ -100,11 +100,14 @@ TrustTunnelGUI-1.1.0-setup.exe --silent
 | Настройка приложений | не требуется | указать `127.0.0.1:1080` (порт меняется) в настройках прокси |
 | Другие устройства в сети | — | по желанию: на всех адаптерах или только на выбранном, с логином и паролем |
 | Исключённые маршруты, DNS системы | применяются | не применяются |
+| Выбор сетевого адаптера | исходящий: через какой адаптер идти к серверу | входящий: на каком адаптере принимать подключения |
 
 <p align="center">
   <img src="docs/screenshots/connection-mode.png" width="49%" alt="Режим подключения">
   <img src="docs/screenshots/servers-socks.png" width="49%" alt="Адрес прокси на экране серверов">
 </p>
+
+**Исходящий адаптер (TUN).** Если у компьютера несколько выходов в интернет (например, Ethernet и Wi-Fi или LTE-модем), в блоке *VPN (TUN)* можно выбрать, через какой из них клиент подключается к серверу. При подключении GUI передаёт клиенту индекс этого интерфейса в параметре `bound_if`. В списке только адаптеры со шлюзом. Значение «Автоматически» оставляет выбор клиенту.
 
 **Выбор сетевого адаптера.** Если в компьютере несколько адаптеров (например, Ethernet в домашней сети, Wi-Fi
 в гостевой и виртуальный Hyper-V), прокси можно открыть только на одном из них. Для этого в списке
@@ -197,10 +200,10 @@ scripts\build.cmd
 ```
 dist/
 ├── portable/
-│   ├── TrustTunnelGUI-1.1.0-portable/      готовая к запуску папка
-│   └── TrustTunnelGUI-1.1.0-portable.zip
+│   ├── TrustTunnelGUI-1.2.0-portable/      готовая к запуску папка
+│   └── TrustTunnelGUI-1.2.0-portable.zip
 └── installer/
-    └── TrustTunnelGUI-1.1.0-setup.exe
+    └── TrustTunnelGUI-1.2.0-setup.exe
 ```
 
 Отладочная сборка `scripts\build.cmd -Dev` создаёт `dist\dev\TrustTunnelGUI.dev.exe` с самотестами:

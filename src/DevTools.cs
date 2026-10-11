@@ -104,6 +104,20 @@ namespace TrustTunnelGui
             lan.SocksAdapterId = "{00000000-0000-0000-0000-000000000000}";
             sb.AppendLine("lan gone adapter: " + lan.SocksAddress + " missing=" + lan.SocksAdapterMissing);
 
+            // TUN outbound adapter (bound_if).
+            foreach (var a in Net.OutboundAdapters()) sb.AppendLine("outbound: " + a.Label + " index=" + a.Index);
+            var tun = new AppSettings();
+            sb.AppendLine("tun auto: bound_if=\"" + tun.TunBoundInterface + "\" missing=" + tun.TunAdapterMissing);
+            var outbound = Net.OutboundAdapters().FirstOrDefault();
+            if (outbound != null)
+            {
+                tun.TunAdapterId = outbound.Id;
+                var tunCfg = ConfigBuilder.Build(local, profile, tun);
+                sb.AppendLine("tun adapter: " + tunCfg.Split('\n').First(l => l.StartsWith("bound_if")).Trim() + " missing=" + tun.TunAdapterMissing);
+            }
+            tun.TunAdapterId = "{00000000-0000-0000-0000-000000000000}";
+            sb.AppendLine("tun gone adapter: missing=" + tun.TunAdapterMissing + " bound_if=" + (tun.TunBoundInterface ?? "null"));
+
             var back = ServerImport.FromClientConfig(cfg);
             sb.AppendLine("roundtrip: address=" + back.Address + " pass=" + back.Password + " proto=" + back.Protocol + " cr=" + back.ClientRandom + " cert=" + back.Certificate.Replace("\n", "\\n"));
             sb.AppendLine("valid addr: " + string.Join(",", new[] { "1.2.3.4", "1.2.3.4:443", "vpn.example.com", "vpn.example.com:8443", "::1", "[::1]:443", "bad host", "1.2.3.4:99999" }.Select(a => a + "=" + Validation.IsAddress(a))));

@@ -146,6 +146,11 @@ namespace TrustTunnelGui
         public static string SocksAuthHelper = "Необязательно. Если не указаны, прокси работает без аутентификации";
         public static string SocksAuthPair = "Укажите и имя пользователя, и пароль";
         public static string SocksLanNoAuth = "Без пароля прокси сможет использовать любое устройство в сети";
+        public static string TunAdapter = "Исходящий адаптер";
+        public static string TunAdapterAuto = "Автоматически";
+        public static string TunAdapterAutoHint = "Клиент сам выбирает адаптер для подключения к серверу, обычно основной";
+        public static string TunAdapterHint = "Подключение к серверу всегда идёт через выбранный адаптер";
+        public static string TunAdapterUnavailable = "Выбранный исходящий адаптер отключён или не имеет шлюза. Подключите его или выберите «Автоматически» в настройках режима подключения";
         public static string SocksAdapter = "Сетевой адаптер";
         public static string SocksAdapterAll = "Все адаптеры";
         public static string SocksAdapterAllHint = "Прокси принимает подключения на всех сетевых адаптерах";
@@ -268,6 +273,10 @@ namespace TrustTunnelGui
             { "SocksAuthHelper", "Optional. Without them the proxy accepts connections without authentication" },
             { "SocksAuthPair", "Set both username and password" },
             { "SocksLanNoAuth", "Without a password any device on the network can use the proxy" },
+            { "TunAdapter", "Outbound adapter" }, { "TunAdapterAuto", "Automatic" },
+            { "TunAdapterAutoHint", "The client picks the adapter for the server connection itself, usually the main one" },
+            { "TunAdapterHint", "The connection to the server always goes through the selected adapter" },
+            { "TunAdapterUnavailable", "The selected outbound adapter is disconnected or has no gateway. Connect it or choose Automatic in the connection mode settings" },
             { "SocksAdapter", "Network adapter" }, { "SocksAdapterAll", "All adapters" },
             { "SocksAdapterAllHint", "The proxy accepts connections on every network adapter" },
             { "SocksAdapterHint", "The proxy accepts connections only through the selected adapter" },

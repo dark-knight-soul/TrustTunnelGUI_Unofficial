@@ -106,6 +106,28 @@ namespace TrustTunnelGui
         public string SocksAdapterId = "";
         public string SocksAdapterName = "";
 
+        // TUN mode: adapter the client uses to reach the server (bound_if); empty = detected by the client.
+        public string TunAdapterId = "";
+        public string TunAdapterName = "";
+
+        // Interface index for bound_if, "" for automatic; null when the chosen adapter is unavailable.
+        [ScriptIgnore]
+        public string TunBoundInterface
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(TunAdapterId)) return "";
+                var index = Net.OutboundIndex(TunAdapterId);
+                return index.HasValue ? index.Value.ToString(CultureInfo.InvariantCulture) : null;
+            }
+        }
+
+        [ScriptIgnore]
+        public bool TunAdapterMissing
+        {
+            get { return !IsSocks && !string.IsNullOrEmpty(TunAdapterId) && TunBoundInterface == null; }
+        }
+
         [ScriptIgnore]
         public bool SocksAdapterMissing
         {
@@ -278,7 +300,8 @@ namespace TrustTunnelGui
                 return sb.ToString();
             }
             sb.AppendLine("[listener.tun]");
-            Kv(sb, "bound_if", Str(""));
+            // On Windows bound_if accepts the interface index (as shown by "route print") as a string.
+            Kv(sb, "bound_if", Str(settings.TunBoundInterface ?? ""));
             Kv(sb, "included_routes", List(Defaults.IncludedRoutes));
             Kv(sb, "excluded_routes", List(settings.ExcludedRoutes));
             Kv(sb, "mtu_size", Defaults.Mtu.ToString(CultureInfo.InvariantCulture));

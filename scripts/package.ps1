@@ -85,8 +85,13 @@ Invoke-Csc $appExe (Join-Path $root 'src\app.manifest') $appSources @($iconResou
 $name = "TrustTunnelGUI-$version-portable"
 $portableRoot = Join-Path $dist 'portable'
 $portableDir = Join-Path $portableRoot $name
-Reset-Directory $portableRoot
-New-Item -ItemType Directory -Force $portableDir | Out-Null
+# Only this version's output is replaced; a copy that has been run (it has .\data with servers) is never touched.
+if (Test-Path (Join-Path $portableDir 'data')) {
+    throw "$portableDir is in use as a working copy (it contains a data folder with settings). Move that folder out of dist\ before rebuilding."
+}
+Reset-Directory $portableDir
+$portableZip = Join-Path $portableRoot "$name.zip"
+if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
 Copy-Item $appExe $portableDir
 foreach ($f in $clientFiles) { Copy-Item (Join-Path $clientDir $f) $portableDir }
 Set-Content (Join-Path $portableDir 'portable') 'Settings and logs of this copy are stored in the data folder next to TrustTunnelGUI.exe.' -Encoding ASCII
@@ -102,8 +107,8 @@ $payloadZip = Join-Path $obj 'payload.zip'
 New-Zip $payloadDir $payloadZip $false
 
 $installerDir = Join-Path $dist 'installer'
-Reset-Directory $installerDir
+New-Item -ItemType Directory -Force $installerDir | Out-Null
 Invoke-Csc (Join-Path $installerDir "TrustTunnelGUI-$version-setup.exe") (Join-Path $root 'installer\setup.manifest') $setupSources @($iconResource, "$payloadZip,payload.zip") $null
 
 Write-Host ""
-Get-ChildItem $portableRoot, $installerDir -File | ForEach-Object { '{0,-45} {1,8:N1} MB' -f $_.Name, ($_.Length / 1MB) }
+Get-Item $portableZip, (Join-Path $installerDir "TrustTunnelGUI-$version-setup.exe") | ForEach-Object { '{0,-45} {1,8:N1} MB' -f $_.Name, ($_.Length / 1MB) }
