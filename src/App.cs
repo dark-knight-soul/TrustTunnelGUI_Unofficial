@@ -19,9 +19,12 @@ using ImageSource = System.Windows.Media.ImageSource;
 using WinForms = System.Windows.Forms;
 
 [assembly: AssemblyTitle("TrustTunnel GUI")]
+[assembly: AssemblyDescription("Unofficial graphical interface for the TrustTunnel VPN client")]
+[assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
-[assembly: AssemblyVersion("1.2.1.0")]
-[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
+[assembly: AssemblyVersion("1.2.2.0")]
+[assembly: AssemblyFileVersion("1.2.2.0")]
 
 namespace TrustTunnelGui
 {

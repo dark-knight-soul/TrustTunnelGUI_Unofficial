@@ -6,6 +6,9 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,9 +19,12 @@ using Microsoft.Win32;
 using TrustTunnelGui;
 
 [assembly: AssemblyTitle("TrustTunnel GUI Setup")]
+[assembly: AssemblyDescription("Installer of TrustTunnel GUI, an unofficial graphical interface for the TrustTunnel client")]
+[assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
-[assembly: AssemblyVersion("1.2.1.0")]
-[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
+[assembly: AssemblyVersion("1.2.2.0")]
+[assembly: AssemblyFileVersion("1.2.2.0")]
 
 namespace TrustTunnelSetup
 {
@@ -81,14 +87,22 @@ namespace TrustTunnelSetup
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Name); }
         }
 
+        // Where shortcuts, the uninstall entry and the payload come from; development tests redirect them into a sandbox
+        // that also leaves autostart entries and running copies of the app alone.
+        public static string StartMenuDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms);
+        public static string DesktopDir = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        public static RegistryHive Hive = RegistryHive.LocalMachine;
+        public static bool Sandbox;
+        public static string PayloadFile;
+
         public static string StartMenuShortcut
         {
-            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), Name + ".lnk"); }
+            get { return Path.Combine(StartMenuDir, Name + ".lnk"); }
         }
 
         public static string DesktopShortcut
         {
-            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), Name + ".lnk"); }
+            get { return Path.Combine(DesktopDir, Name + ".lnk"); }
         }
 
         public static string UserDataDir
@@ -98,7 +112,7 @@ namespace TrustTunnelSetup
 
         static RegistryKey Hklm()
         {
-            return RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            return RegistryKey.OpenBaseKey(Hive, RegistryView.Registry64);
         }
 
         // Install location and version of an existing installation, if any.
@@ -151,25 +165,32 @@ namespace TrustTunnelSetup
 
         public static bool AppIsRunning()
         {
+            if (Sandbox) return false;
             return Process.GetProcessesByName("TrustTunnelGUI").Length > 0 || Process.GetProcessesByName("trusttunnel_client").Length > 0;
         }
 
         public static void CreateShortcut(string lnk, string target)
         {
-            var shellType = Type.GetTypeFromProgID("WScript.Shell");
-            var shell = Activator.CreateInstance(shellType);
-            var shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnk });
-            var t = shortcut.GetType();
-            t.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { target });
-            t.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(target) });
-            t.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { target + ",0" });
-            t.InvokeMember("Description", BindingFlags.SetProperty, null, shortcut, new object[] { Name });
-            t.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+            Directory.CreateDirectory(Path.GetDirectoryName(lnk));
+            var link = (ShellLink.IShellLinkW)new ShellLink.CShellLink();
+            try
+            {
+                link.SetPath(target);
+                link.SetWorkingDirectory(Path.GetDirectoryName(target));
+                link.SetIconLocation(target, 0);
+                link.SetDescription(Name);
+                ((IPersistFile)link).Save(lnk, true);
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(link);
+            }
         }
 
         // Removes launch-at-login entries the app may have created (Run key and scheduled task).
         public static void RemoveAutostart()
         {
+            if (Sandbox) return;
             try
             {
                 using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
@@ -186,7 +207,38 @@ namespace TrustTunnelSetup
 
         public static Stream Payload()
         {
+            if (PayloadFile != null) return File.OpenRead(PayloadFile);
             return Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip");
+        }
+    }
+
+    // Shell link (.lnk) through the documented IShellLinkW interface.
+    static class ShellLink
+    {
+        [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+        public class CShellLink { }
+
+        [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+        public interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+            void GetIDList(out IntPtr ppidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+            void GetHotkey(out short pwHotkey);
+            void SetHotkey(short wHotkey);
+            void GetShowCmd(out int piShowCmd);
+            void SetShowCmd(int iShowCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+            void Resolve(IntPtr hwnd, int fFlags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
         }
     }
 
@@ -263,13 +315,18 @@ namespace TrustTunnelSetup
             progress(1, S.Done);
         }
 
-        // The running uninstaller cannot delete itself; a short-lived cmd finishes the job.
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool MoveFileEx(string existing, string target, int flags);
+
+        const int MOVEFILE_DELAY_UNTIL_REBOOT = 4;
+
+        // The running uninstaller cannot delete itself; Windows removes it and the emptied folder at the next restart.
         public static void ScheduleSelfDelete(string dir)
         {
             var self = Assembly.GetExecutingAssembly().Location;
             if (!self.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) return;
-            var cmd = "/c ping 127.0.0.1 -n 3 >nul & del /f /q \"" + self + "\" & rmdir \"" + dir + "\"";
-            Process.Start(new ProcessStartInfo("cmd.exe", cmd) { CreateNoWindow = true, UseShellExecute = false, WorkingDirectory = Path.GetTempPath() });
+            MoveFileEx(self, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+            MoveFileEx(dir, null, MOVEFILE_DELAY_UNTIL_REBOOT);
         }
 
         // Started through explorer.exe so the app runs with the user's normal rights, not the installer's.
@@ -298,6 +355,8 @@ namespace TrustTunnelSetup
             if (themeIdx >= 0) Theme.Install(app, args[themeIdx + 1]);
             int idx = Array.IndexOf(args, "--render");
             if (idx >= 0) { DevRender.Run(app, args[idx + 1]); return 0; }
+            int testIdx = Array.IndexOf(args, "--test-install");
+            if (testIdx >= 0) return DevInstallTest.Run(app, args[testIdx + 1], args[testIdx + 2]);
 #endif
             var dir = uninstall
                 ? (installed ? installedDir : Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location))
@@ -338,6 +397,9 @@ namespace TrustTunnelSetup
         readonly Border _host = new Border();
         string _dir;
         bool _busy;
+
+        public bool Busy { get { return _busy; } }
+        public Exception LastError { get; private set; }
 
         public SetupWindow(bool uninstall, string dir, string updateFrom)
         {
@@ -467,7 +529,9 @@ namespace TrustTunnelSetup
                 if (dir.Length == 0) { ShowError(error, S.FolderEmpty); return; }
                 if (Product.AppIsRunning()) { ShowError(error, S.CloseApp); return; }
                 _dir = dir;
-                RunWork(S.Installing, delegate(Action<double, string> p) { Engine.Install(dir, desktop.IsChecked == true, p); },
+                // Read the controls here: the work runs on another thread and must not touch them.
+                bool desktopShortcut = desktop.IsChecked == true;
+                RunWork(S.Installing, delegate(Action<double, string> p) { Engine.Install(dir, desktopShortcut, p); },
                     delegate { ShowDonePage(string.Format(S.Installed, Product.Version), S.InstalledHint, launch.IsChecked == true); });
             });
             install.IsDefault = true;
@@ -491,7 +555,8 @@ namespace TrustTunnelSetup
             {
                 if (Product.AppIsRunning()) { ShowError(error, S.CloseApp); return; }
                 bool data = removeData.IsChecked == true;
-                RunWork(S.Uninstalling, delegate(Action<double, string> p) { Engine.Uninstall(_dir, data, p); },
+                var dir = _dir;
+                RunWork(S.Uninstalling, delegate(Action<double, string> p) { Engine.Uninstall(dir, data, p); },
                     delegate { ShowDonePage(S.Uninstalled, null, false); });
             }, true);
             SetPage(body, cancel, remove);
@@ -532,10 +597,13 @@ namespace TrustTunnelSetup
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
                     _busy = false;
+                    LastError = failure;
                     if (failure == null) done();
                     else ShowFailedPage(failure.Message);
                 }));
             }) { IsBackground = true };
+            // Shell links are apartment-threaded COM objects.
+            thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
         }
 
@@ -645,6 +713,138 @@ namespace TrustTunnelSetup
             };
             app.Dispatcher.BeginInvoke(next);
             app.Run();
+        }
+    }
+
+    // Clicks through install and uninstall in the real windows, with shortcuts, the uninstall entry
+    // and the install folder inside a sandbox folder and the registry entry under HKCU.
+    static class DevInstallTest
+    {
+        public static int Run(Application app, string sandbox, string payload)
+        {
+            sandbox = Path.GetFullPath(sandbox);
+            Directory.CreateDirectory(sandbox);
+            var dir = Path.Combine(sandbox, "app");
+            Product.StartMenuDir = Path.Combine(sandbox, "start");
+            Product.DesktopDir = Path.Combine(sandbox, "desktop");
+            Product.Hive = RegistryHive.CurrentUser;
+            Product.Sandbox = true;
+            Product.PayloadFile = Path.GetFullPath(payload);
+
+            var log = new List<string>();
+            int failures = 0;
+            Action<bool, string> check = delegate(bool ok, string what)
+            {
+                if (!ok) failures++;
+                log.Add((ok ? "PASS " : "FAIL ") + what);
+            };
+
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var steps = new Queue<Action<Action>>();
+            steps.Enqueue(delegate(Action next)
+            {
+                var w = new SetupWindow(false, dir, null);
+                Drive(w, S.Install, delegate
+                {
+                    check(w.LastError == null, "install finished" + (w.LastError != null ? ": " + w.LastError : ""));
+                    check(File.Exists(Path.Combine(dir, Product.Exe)), "app copied");
+                    check(File.Exists(Path.Combine(dir, Product.Uninstaller)), "uninstaller copied");
+                    check(File.Exists(Product.StartMenuShortcut), "start menu shortcut");
+                    check(File.Exists(Product.DesktopShortcut), "desktop shortcut");
+                    var target = LinkTarget(Product.StartMenuShortcut);
+                    check(string.Equals(target, Path.Combine(dir, Product.Exe), StringComparison.OrdinalIgnoreCase), "shortcut target " + target);
+                    string found, version;
+                    check(Product.FindInstalled(out found, out version) && found == dir && version == Product.Version, "uninstall entry");
+                    w.Close();
+                    next();
+                });
+            });
+            steps.Enqueue(delegate(Action next)
+            {
+                var w = new SetupWindow(true, dir, null);
+                Drive(w, S.Uninstall, delegate
+                {
+                    check(w.LastError == null, "uninstall finished" + (w.LastError != null ? ": " + w.LastError : ""));
+                    check(!Directory.Exists(dir) || Directory.GetFiles(dir, "*", SearchOption.AllDirectories).Length == 0, "files removed");
+                    check(!File.Exists(Product.StartMenuShortcut) && !File.Exists(Product.DesktopShortcut), "shortcuts removed");
+                    string found, version;
+                    check(!Product.FindInstalled(out found, out version), "uninstall entry removed");
+                    w.Close();
+                    next();
+                });
+            });
+
+            Action runNext = null;
+            runNext = delegate
+            {
+                if (steps.Count == 0) { app.Shutdown(); return; }
+                steps.Dequeue()(runNext);
+            };
+            app.Dispatcher.BeginInvoke(runNext);
+            app.Run();
+            File.WriteAllLines(Path.Combine(sandbox, "result.txt"), log);
+            return failures;
+        }
+
+        // Shows the window, presses the button with the given text and waits until the work is done.
+        static void Drive(SetupWindow w, string button, Action done)
+        {
+            w.Left = -20000;
+            w.ShowActivated = false;
+            w.WindowStartupLocation = WindowStartupLocation.Manual;
+            w.Show();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+            bool clicked = false;
+            int ticks = 0;
+            timer.Tick += delegate
+            {
+                if (!clicked)
+                {
+                    var b = FindButton(w, button);
+                    if (b == null) return;
+                    b.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    clicked = true;
+                    return;
+                }
+                if (w.Busy && ++ticks < 200) return;
+                timer.Stop();
+                done();
+            };
+            timer.Start();
+        }
+
+        static string LinkTarget(string lnk)
+        {
+            if (!File.Exists(lnk)) return null;
+            var link = (ShellLink.IShellLinkW)new ShellLink.CShellLink();
+            ((IPersistFile)link).Load(lnk, 0);
+            var sb = new StringBuilder(260);
+            link.GetPath(sb, sb.Capacity, IntPtr.Zero, 0);
+            Marshal.FinalReleaseComObject(link);
+            return sb.ToString();
+        }
+
+        static Button FindButton(DependencyObject root, string text)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                var b = child as Button;
+                if (b != null && ContainsText(b, text)) return b;
+                var found = FindButton(child, text);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        static bool ContainsText(DependencyObject root, string text)
+        {
+            var t = root as TextBlock;
+            if (t != null && t.Text == text) return true;
+            if (root is Button && Equals(((Button)root).Content, text)) return true;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+                if (ContainsText(VisualTreeHelper.GetChild(root, i), text)) return true;
+            return false;
         }
     }
 #endif
