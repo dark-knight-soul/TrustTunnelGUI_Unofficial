@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media.Imaging;
@@ -23,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.3.0")]
-[assembly: AssemblyFileVersion("1.2.3.0")]
+[assembly: AssemblyVersion("1.2.4.0")]
+[assembly: AssemblyFileVersion("1.2.4.0")]
 
 namespace TrustTunnelGui
 {
@@ -165,14 +166,17 @@ namespace TrustTunnelGui
             ExePath = Assembly.GetExecutingAssembly().Location;
             var exeDir = Path.GetDirectoryName(ExePath);
 
-            // The client is shipped next to the exe; development builds also find it in a "client" folder up the tree.
+            // The client is shipped next to the exe. Only development builds look for it up the tree (in a "client" folder):
+            // a release build never runs a client from another folder, possibly a writable one such as C:\client.
             BaseDir = exeDir;
+#if DEVTOOLS
             var dir = exeDir;
             for (int level = 0; level < 4 && dir != null; level++, dir = Path.GetDirectoryName(dir))
             {
                 if (File.Exists(Path.Combine(dir, "trusttunnel_client.exe"))) { BaseDir = dir; break; }
                 if (File.Exists(Path.Combine(dir, "client", "trusttunnel_client.exe"))) { BaseDir = Path.Combine(dir, "client"); break; }
             }
+#endif
             ClientExe = Path.Combine(BaseDir, "trusttunnel_client.exe");
             WizardExe = Path.Combine(BaseDir, "setup_wizard.exe");
 
@@ -216,6 +220,9 @@ namespace TrustTunnelGui
             L.Apply(settings.Language);
 
             if (settings.RunAsAdmin && !IsElevated && RestartElevated(connectServerId)) return false;
+
+            // Before 1.2.4 a portable copy could get an elevated logon task; it becomes a normal Run key entry.
+            if (IsElevated && !Autostart.IsProtectedLocation(ExePath) && Autostart.TaskExists()) Autostart.Set(true, ExePath);
 
             Vpn = new VpnManager(ClientExe, Path.Combine(DataDir, "trusttunnel_client.toml"), Path.Combine(LogDir, "client.log"), Dispatcher);
             Vpn.Failed += OnVpnFailed;
@@ -479,8 +486,14 @@ namespace TrustTunnelGui
 
         public ServerInfo ImportDeepLink(string link)
         {
-            if (!link.StartsWith("tt://", StringComparison.OrdinalIgnoreCase)) throw new Exception(L.ImportFailed);
-            return RunWizard("--deeplink \"" + link.Replace("\"", "") + "\"");
+            if (!IsValidDeepLink(link)) throw new Exception(L.ImportFailed);
+            return RunWizard("--deeplink \"" + link + "\"");
+        }
+
+        // URL characters only: no spaces, quotes or backslashes that could change setup_wizard's arguments.
+        public static bool IsValidDeepLink(string link)
+        {
+            return link.StartsWith("tt://", StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(link, @"^[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$");
         }
 
         public ServerInfo ImportConfigFile(string path)
@@ -628,9 +641,12 @@ namespace TrustTunnelGui
         }
 
         // explorer.exe hands the request to the user's shell, so the browser is not started elevated.
+        // Only web links: explorer would also open a file path or another protocol.
         public static void OpenUrl(string url)
         {
-            try { Process.Start("explorer.exe", url); } catch { }
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps) return;
+            try { Process.Start("explorer.exe", "\"" + uri.AbsoluteUri + "\""); } catch { }
         }
 
         public static void OpenFolder(string dir)
@@ -881,8 +897,9 @@ namespace TrustTunnelGui
             return RunKeyExists() || TaskExists();
         }
 
-        // Elevated: a scheduled task with the highest run level (starts elevated without UAC).
-        // Not elevated: the per-user Run key (starts with normal rights).
+        // Elevated, installed in Program Files: a scheduled task with the highest run level (starts elevated without UAC).
+        // Otherwise the per-user Run key (starts with normal rights). A task that silently starts an exe from a folder
+        // the user can write to (a portable copy) would let any program replace that exe and get administrator rights.
         public static bool Set(bool enable, string exePath)
         {
             if (!enable)
@@ -891,16 +908,63 @@ namespace TrustTunnelGui
                 if (TaskExists() && Schtasks("/Delete /TN \"" + TaskName + "\" /F") != 0) return false;
                 return !IsEnabled();
             }
-            if (!App.IsElevated) return SetRunKey("\"" + exePath + "\" --autostart");
+            if (!App.IsElevated || !IsProtectedLocation(exePath))
+            {
+                if (App.IsElevated && TaskExists()) Schtasks("/Delete /TN \"" + TaskName + "\" /F");
+                return SetRunKey("\"" + exePath + "\" --autostart");
+            }
             SetRunKey(null);
+            return RegisterTask(TaskName, TaskXml(exePath, "HighestAvailable"));
+        }
 
+        // Program Files is writable by administrators only.
+        public static bool IsProtectedLocation(string exePath)
+        {
+            var full = Path.GetFullPath(exePath);
+            foreach (var folder in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
+            {
+                var root = Environment.GetFolderPath(folder);
+                if (root.Length > 0 && full.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        // Registered through the Task Scheduler API: no XML file on disk that another program could swap before it is read.
+        public static bool RegisterTask(string name, string xml)
+        {
+            object service = null;
+            try
+            {
+                var type = Type.GetTypeFromProgID("Schedule.Service");
+                service = Activator.CreateInstance(type);
+                type.InvokeMember("Connect", BindingFlags.InvokeMethod, null, service, new object[0]);
+                var folder = type.InvokeMember("GetFolder", BindingFlags.InvokeMethod, null, service, new object[] { "\\" });
+                // TASK_CREATE_OR_UPDATE = 6, TASK_LOGON_INTERACTIVE_TOKEN = 3
+                folder.GetType().InvokeMember("RegisterTask", BindingFlags.InvokeMethod, null, folder,
+                    new object[] { name, xml, 6, null, null, 3, null });
+                Marshal.FinalReleaseComObject(folder);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Write("Register task: " + (ex.InnerException ?? ex).Message);
+                return false;
+            }
+            finally
+            {
+                if (service != null) Marshal.FinalReleaseComObject(service);
+            }
+        }
+
+        public static string TaskXml(string exePath, string runLevel)
+        {
             var user = WindowsIdentity.GetCurrent().Name;
-            var xml =
+            return
 "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
 "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n" +
 "  <RegistrationInfo><Description>Starts TrustTunnel GUI at logon</Description></RegistrationInfo>\n" +
 "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + Esc(user) + "</UserId><Delay>PT5S</Delay></LogonTrigger></Triggers>\n" +
-"  <Principals><Principal id=\"Author\"><UserId>" + Esc(user) + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n" +
+"  <Principals><Principal id=\"Author\"><UserId>" + Esc(user) + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>" + runLevel + "</RunLevel></Principal></Principals>\n" +
 "  <Settings>\n" +
 "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n" +
 "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n" +
@@ -919,16 +983,6 @@ namespace TrustTunnelGui
 "  </Settings>\n" +
 "  <Actions Context=\"Author\"><Exec><Command>" + Esc(exePath) + "</Command><Arguments>--autostart</Arguments><WorkingDirectory>" + Esc(Path.GetDirectoryName(exePath)) + "</WorkingDirectory></Exec></Actions>\n" +
 "</Task>\n";
-            var file = Path.Combine(Path.GetTempPath(), "trusttunnel_gui_task.xml");
-            try
-            {
-                File.WriteAllText(file, xml, Encoding.Unicode);
-                return Schtasks("/Create /TN \"" + TaskName + "\" /XML \"" + file + "\" /F") == 0;
-            }
-            finally
-            {
-                try { File.Delete(file); } catch { }
-            }
         }
 
         static bool SetRunKey(string command)

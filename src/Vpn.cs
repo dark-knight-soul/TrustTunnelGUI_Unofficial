@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Windows.Threading;
@@ -89,6 +91,23 @@ namespace TrustTunnelGui
                 if (Queries.Count > MaxQueries) Queries.RemoveRange(0, Queries.Count - MaxQueries);
                 if (QueryAdded != null) QueryAdded(q);
             };
+            // Left over after a crash or power loss; it holds the server password in plain text.
+            DeleteConfig();
+        }
+
+        // The config holds the password in plain text: only the current user, administrators and SYSTEM may open it,
+        // whatever the folder allows (a portable copy may sit in a shared folder or on a USB drive).
+        void WriteConfig(string config)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_configFile));
+            DeleteConfig();
+            var security = new FileSecurity();
+            security.SetAccessRuleProtection(true, false);
+            foreach (var sid in new[] { WindowsIdentity.GetCurrent().User, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) })
+                security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
+            var bytes = new UTF8Encoding(false).GetBytes(config);
+            using (var stream = File.Create(_configFile, 4096, FileOptions.None, security))
+                stream.Write(bytes, 0, bytes.Length);
         }
 
         void Drain()
@@ -146,8 +165,7 @@ namespace TrustTunnelGui
             SetState(VpnState.Connecting);
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(_configFile));
-                File.WriteAllText(_configFile, config, new UTF8Encoding(false));
+                WriteConfig(config);
                 OpenLogWriter();
                 AddLine("---- " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " ----", LogLevel.Info);
 

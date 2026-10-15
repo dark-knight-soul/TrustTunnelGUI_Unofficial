@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows;
 using System.Windows.Media;
@@ -51,6 +52,10 @@ namespace TrustTunnelGui
             {
                 t1.Stop();
                 sb.AppendLine("config exists while running: " + File.Exists(Path.Combine(dir, "c.toml")));
+                var acl = File.GetAccessControl(Path.Combine(dir, "c.toml"));
+                sb.AppendLine("config inherits folder access: " + !acl.AreAccessRulesProtected);
+                foreach (System.Security.AccessControl.FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(System.Security.Principal.NTAccount)))
+                    sb.AppendLine("  access: " + rule.IdentityReference + " " + rule.FileSystemRights + (rule.IsInherited ? " (inherited)" : ""));
                 vpn.Disconnect();
             };
             t1.Start();
@@ -216,6 +221,19 @@ namespace TrustTunnelGui
                 PingService.SplitAddress(a, out host, out port);
                 sb.AppendLine("split " + a + " -> " + host + " " + port);
             }
+
+            // Security checks.
+            foreach (var link in new[] { "tt://AbC-_123=?x=1&y=%20", "tt://a\" --settings \"C:\\x", "tt://a b", "tt://a\\", "https://x" })
+                sb.AppendLine("deeplink accepted " + link + ": " + App.IsValidDeepLink(link));
+            foreach (var p in new[] { @"C:\Program Files\TrustTunnel GUI\TrustTunnelGUI.exe", @"C:\Program Files (x86)\X\a.exe", @"C:\Program FilesX\a.exe", @"C:\Users\me\Downloads\TrustTunnelGUI.exe" })
+                sb.AppendLine("protected location " + p + ": " + Autostart.IsProtectedLocation(p));
+            const string testTask = "TrustTunnel GUI self-test";
+            sb.AppendLine("register task (least privilege): " + Autostart.RegisterTask(testTask, Autostart.TaskXml(App.ExePath, "LeastPrivilege")));
+            var query = Process.Start(new ProcessStartInfo("schtasks.exe", "/Query /TN \"" + testTask + "\" /XML") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true });
+            var taskXml = query.StandardOutput.ReadToEnd();
+            query.WaitForExit();
+            sb.AppendLine("task registered: " + (query.ExitCode == 0) + ", command ok: " + taskXml.Contains(App.ExePath) + ", run level: " + Regex.Match(taskXml, "<RunLevel>(.*?)</RunLevel>").Groups[1].Value);
+            Process.Start(new ProcessStartInfo("schtasks.exe", "/Delete /TN \"" + testTask + "\" /F") { UseShellExecute = false, CreateNoWindow = true }).WaitForExit();
 
             // 4. Update check against the published releases.
             try

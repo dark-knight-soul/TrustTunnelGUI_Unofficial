@@ -23,8 +23,8 @@ using TrustTunnelGui;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.3.0")]
-[assembly: AssemblyFileVersion("1.2.3.0")]
+[assembly: AssemblyVersion("1.2.4.0")]
+[assembly: AssemblyFileVersion("1.2.4.0")]
 
 namespace TrustTunnelSetup
 {
@@ -250,6 +250,7 @@ namespace TrustTunnelSetup
             progress(0, S.CopyingFiles);
             Directory.CreateDirectory(dir);
             long total = 0;
+            var root = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
             using (var payload = Product.Payload())
             {
                 if (payload == null) throw new InvalidOperationException("payload.zip is missing");
@@ -259,8 +260,8 @@ namespace TrustTunnelSetup
                     for (int i = 0; i < entries.Count; i++)
                     {
                         var entry = entries[i];
-                        var target = Path.GetFullPath(Path.Combine(dir, entry.FullName.Replace('/', '\\')));
-                        if (!target.StartsWith(Path.GetFullPath(dir), StringComparison.OrdinalIgnoreCase)) continue;
+                        var target = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', '\\')));
+                        if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
                         Directory.CreateDirectory(Path.GetDirectoryName(target));
                         using (var src = entry.Open())
                         using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write))
@@ -297,15 +298,16 @@ namespace TrustTunnelSetup
 
             progress(0.3, S.Uninstalling);
             var self = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
+            // Only the files setup put there: the folder may have been chosen by hand and hold other files.
             if (Directory.Exists(dir))
             {
-                foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                foreach (var file in InstalledFiles(dir))
                 {
-                    if (string.Equals(Path.GetFullPath(file), self, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.Equals(file, self, StringComparison.OrdinalIgnoreCase) || !File.Exists(file)) continue;
                     try { File.SetAttributes(file, FileAttributes.Normal); File.Delete(file); } catch { }
                 }
                 foreach (var sub in Directory.GetDirectories(dir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
-                    try { Directory.Delete(sub, false); } catch { }
+                    try { if (!Directory.EnumerateFileSystemEntries(sub).Any()) Directory.Delete(sub, false); } catch { }
             }
 
             progress(0.7, S.Uninstalling);
@@ -313,6 +315,24 @@ namespace TrustTunnelSetup
                 try { Directory.Delete(Product.UserDataDir, true); } catch { }
             Product.Unregister();
             progress(1, S.Done);
+        }
+
+        // Full paths of the payload files and the uninstaller inside the install folder.
+        static List<string> InstalledFiles(string dir)
+        {
+            var root = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
+            var files = new List<string> { root + Product.Uninstaller };
+            using (var payload = Product.Payload())
+            {
+                if (payload == null) return files;
+                using (var zip = new ZipArchive(payload, ZipArchiveMode.Read))
+                    foreach (var entry in zip.Entries.Where(e => e.Name.Length > 0))
+                    {
+                        var target = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', '\\')));
+                        if (target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) files.Add(target);
+                    }
+            }
+            return files;
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -761,11 +781,16 @@ namespace TrustTunnelSetup
             });
             steps.Enqueue(delegate(Action next)
             {
+                // A file that setup did not create must survive the uninstall.
+                var foreign = Path.Combine(dir, "notes", "user file.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(foreign));
+                File.WriteAllText(foreign, "keep me");
                 var w = new SetupWindow(true, dir, null);
                 Drive(w, S.Uninstall, delegate
                 {
                     check(w.LastError == null, "uninstall finished" + (w.LastError != null ? ": " + w.LastError : ""));
-                    check(!Directory.Exists(dir) || Directory.GetFiles(dir, "*", SearchOption.AllDirectories).Length == 0, "files removed");
+                    var left = Directory.Exists(dir) ? Directory.GetFiles(dir, "*", SearchOption.AllDirectories) : new string[0];
+                    check(left.Length == 1 && left[0] == foreign, "setup files removed, other files kept: " + string.Join(", ", left));
                     check(!File.Exists(Product.StartMenuShortcut) && !File.Exists(Product.DesktopShortcut), "shortcuts removed");
                     string found, version;
                     check(!Product.FindInstalled(out found, out version), "uninstall entry removed");
