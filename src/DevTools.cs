@@ -206,6 +206,10 @@ namespace TrustTunnelGui
             // 3. Ping.
             sb.AppendLine("ping client.lideropt.uz: " + PingService.Measure("client.lideropt.uz"));
             sb.AppendLine("ping 127.0.0.1:1 (closed): " + PingService.Measure("127.0.0.1:1"));
+            sb.AppendLine("quic client.lideropt.uz: " + PingService.MeasureQuic("client.lideropt.uz"));
+            sb.AppendLine("quic cloudflare.com: " + PingService.MeasureQuic("cloudflare.com:443"));
+            sb.AppendLine("quic 127.0.0.1:1 (closed): " + PingService.MeasureQuic("127.0.0.1:1"));
+            sb.AppendLine("quic 1.1.1.1:53 (not QUIC): " + PingService.MeasureQuic("1.1.1.1:53"));
             string host; int port;
             foreach (var a in new[] { "1.2.3.4", "h.example.com:8443", "[2001:db8::1]:443", "2001:db8::1" })
             {

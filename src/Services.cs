@@ -11,7 +11,8 @@ using System.Windows.Threading;
 
 namespace TrustTunnelGui
 {
-    // Latency of each server: time to open a TCP connection to its address and port (no authentication).
+    // Latency of each server, without authentication: for HTTP/2 the time to open a TCP connection,
+    // for HTTP/3 the round trip of a QUIC version negotiation over UDP.
     class PingService
     {
         public const int Unreachable = -1;
@@ -59,12 +60,13 @@ namespace TrustTunnelGui
             {
                 var id = s.Id;
                 var address = s.Address;
+                bool quic = s.Protocol == "http3";
                 if (_running.Contains(id)) continue;
                 _running.Add(id);
                 ThreadPool.QueueUserWorkItem(delegate
                 {
                     var sw = Stopwatch.StartNew();
-                    int ms = Measure(address);
+                    int ms = quic ? MeasureQuic(address) : Measure(address);
                     // A fast server answers in ~20 ms; keep the progress visible long enough to be noticed.
                     var left = MinVisibleMs - (int)sw.ElapsedMilliseconds;
                     if (left > 0) Thread.Sleep(left);
@@ -95,6 +97,47 @@ namespace TrustTunnelGui
                     var task = client.ConnectAsync(ips[0], port);
                     if (!task.Wait(TimeoutMs) || !client.Connected) return Unreachable;
                     return (int)Math.Max(1, sw.ElapsedMilliseconds);
+                }
+            }
+            catch
+            {
+                return Unreachable;
+            }
+        }
+
+        // Sends a QUIC Initial with a reserved version (RFC 9000, section 6.3): a QUIC server answers with
+        // Version Negotiation without starting a handshake. The datagram is padded to 1200 bytes,
+        // the smallest one a server responds to.
+        public static int MeasureQuic(string address)
+        {
+            string host;
+            int port;
+            if (!SplitAddress(address, out host, out port)) return Unreachable;
+            try
+            {
+                var ips = Dns.GetHostAddresses(host);
+                if (ips.Length == 0) return Unreachable;
+                using (var udp = new UdpClient(ips[0].AddressFamily))
+                {
+                    var packet = new byte[1200];
+                    var cid = new byte[8];
+                    new Random().NextBytes(cid);
+                    packet[0] = 0xC0;
+                    packet[1] = 0x1A; packet[2] = 0x2A; packet[3] = 0x3A; packet[4] = 0x4A;
+                    packet[5] = 8;
+                    Array.Copy(cid, 0, packet, 6, 8);
+                    packet[14] = 8;
+                    Array.Copy(cid, 0, packet, 15, 8);
+
+                    udp.Connect(ips[0], port);
+                    var sw = Stopwatch.StartNew();
+                    udp.Send(packet, packet.Length);
+                    var receive = udp.ReceiveAsync();
+                    if (!receive.Wait(TimeoutMs)) return Unreachable;
+                    var reply = receive.Result.Buffer;
+                    bool negotiation = reply.Length >= 7 && (reply[0] & 0x80) != 0
+                        && reply[1] == 0 && reply[2] == 0 && reply[3] == 0 && reply[4] == 0;
+                    return negotiation ? (int)Math.Max(1, sw.ElapsedMilliseconds) : Unreachable;
                 }
             }
             catch
