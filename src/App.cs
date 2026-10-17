@@ -24,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.4.0")]
-[assembly: AssemblyFileVersion("1.2.4.0")]
+[assembly: AssemblyVersion("1.2.5.0")]
+[assembly: AssemblyFileVersion("1.2.5.0")]
 
 namespace TrustTunnelGui
 {
@@ -54,6 +54,8 @@ namespace TrustTunnelGui
         int _reconnectAttempt;
         static readonly int[] ReconnectDelays = { 2, 5, 10, 20, 30 };
         const int MaxReconnectAttempts = 10;
+        DispatcherTimer _networkTimer;
+        string _clientNetwork;   // Net.NetworkFingerprint() when the client was started
         string _clientVersion;
         static Mutex _mutex;
         bool _autostart;
@@ -234,6 +236,13 @@ namespace TrustTunnelGui
                 // Network is back: do not wait for the rest of the back-off delay.
                 if (e.IsAvailable) Dispatcher.BeginInvoke(new Action(delegate { if (IsReconnecting) ReconnectNow(); }));
             };
+            // Addresses change in bursts while an adapter switches networks: act once they settle.
+            _networkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            _networkTimer.Tick += delegate { _networkTimer.Stop(); OnNetworkChanged(); };
+            System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += delegate
+            {
+                Dispatcher.BeginInvoke(new Action(delegate { _networkTimer.Stop(); _networkTimer.Start(); }));
+            };
 
             Window = new MainWindow();
             _tray = new Tray(this);
@@ -347,6 +356,26 @@ namespace TrustTunnelGui
             if (server != null && Vpn.State == VpnState.Disconnected) Connect(server, true);
         }
 
+        // The client picks the outbound adapter and gateway when it starts and keeps using them: after a switch
+        // to another network (Wi-Fi to Ethernet, another access point) it stays in recovery forever. Restart it there.
+        void OnNetworkChanged()
+        {
+            var network = Net.NetworkFingerprint();
+            // Offline, or back on the same network: the running client recovers by itself.
+            if (network.Length == 0 || network == _clientNetwork) return;
+            if (IsReconnecting)
+            {
+                ReconnectNow();
+                return;
+            }
+            if (Vpn.State != VpnState.Connected && Vpn.State != VpnState.Connecting) return;
+            var server = Store.Server(Vpn.ActiveServerId);
+            if (server == null) return;
+            Log.Write("Network changed, restarting the client");
+            if (Window.IsVisible) Window.ShowSnack(L.NetworkChanged);
+            Connect(server);
+        }
+
         public void CancelReconnect()
         {
             bool was = IsReconnecting || _reconnectAttempt > 0;
@@ -432,6 +461,7 @@ namespace TrustTunnelGui
                 return;
             }
             var id = server.Id;
+            _clientNetwork = Net.NetworkFingerprint();
             Vpn.Connect(id, delegate { return BuildConfig(id); }, Store.Data.Settings.LogLevel == "debug" ? "debug" : "info");
         }
 

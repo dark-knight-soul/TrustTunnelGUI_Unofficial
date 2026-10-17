@@ -26,6 +26,11 @@ namespace TrustTunnelGui
             if (args.Length >= 3 && args[0] == "--test-vpn") { TestVpn(args[1], args[2]); return true; }
             if (args.Length >= 2 && args[0] == "--test-features") { TestFeatures(args[1]); return true; }
             if (args.Length >= 3 && args[0] == "--test-ping-ui") { TestPingUi(args[1], args[2]); return true; }
+            if (args.Length >= 2 && args[0] == "--print-network")
+            {
+                File.WriteAllText(args[1], Net.NetworkFingerprint() + "\n");
+                return true;
+            }
             if (args.Length >= 2 && args[0] == "--print-paths")
             {
                 File.WriteAllText(args[1], "portable=" + App.IsPortable + "\nbase=" + App.BaseDir + "\nclient=" + App.ClientExe +

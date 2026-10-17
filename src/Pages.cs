@@ -1630,10 +1630,7 @@ namespace TrustTunnelGui
             {
                 foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
                 {
-                    if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
-                    if (nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback ||
-                        nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
-                    if (nic.Description.IndexOf("wintun", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (!IsLocalAdapter(nic)) continue;
                     var ip = nic.GetIPProperties().UnicastAddresses
                         .Select(a => a.Address)
                         .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !a.ToString().StartsWith("169.254."));
@@ -1657,6 +1654,40 @@ namespace TrustTunnelGui
             }
             catch { }
             return result;
+        }
+
+        static bool IsLocalAdapter(System.Net.NetworkInformation.NetworkInterface nic)
+        {
+            return nic.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up &&
+                   nic.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback &&
+                   nic.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Tunnel &&
+                   nic.Description.IndexOf("wintun", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        // The networks the tunnel can go through: adapter, IPv4 addresses and gateways of every adapter with a gateway;
+        // "" when offline. DNS servers are left out (the client changes them), and so is IPv6 (temporary addresses rotate).
+        public static string NetworkFingerprint()
+        {
+            var parts = new List<string>();
+            try
+            {
+                foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (!IsLocalAdapter(nic)) continue;
+                    var props = nic.GetIPProperties();
+                    var gateways = props.GatewayAddresses.Select(g => g.Address)
+                        .Where(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !a.Equals(System.Net.IPAddress.Any))
+                        .Select(a => a.ToString()).OrderBy(s => s, StringComparer.Ordinal).ToList();
+                    if (gateways.Count == 0) continue;
+                    var ips = props.UnicastAddresses.Select(a => a.Address)
+                        .Where(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        .Select(a => a.ToString()).OrderBy(s => s, StringComparer.Ordinal);
+                    parts.Add(nic.Id + "|" + string.Join(",", ips) + "|" + string.Join(",", gateways));
+                }
+            }
+            catch { }
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join(";", parts);
         }
 
         // Adapters that can carry the tunnel to the server (have an IPv4 gateway and an interface index).
