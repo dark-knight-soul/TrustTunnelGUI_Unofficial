@@ -23,8 +23,8 @@ using TrustTunnelGui;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.5.0")]
-[assembly: AssemblyFileVersion("1.2.5.0")]
+[assembly: AssemblyVersion("1.2.6.0")]
+[assembly: AssemblyFileVersion("1.2.6.0")]
 
 namespace TrustTunnelSetup
 {
@@ -60,8 +60,11 @@ namespace TrustTunnelSetup
         public static readonly string Finish = T("Готово", "Finish");
         public static readonly string Close = T("Закрыть", "Close");
         public static readonly string Failed = T("Не удалось завершить операцию", "The operation failed");
-        public static readonly string CloseApp = T("Закройте TrustTunnel GUI (значок в области уведомлений → «Выйти») и повторите попытку",
-            "Close TrustTunnel GUI (notification area icon → Quit) and try again");
+        public static readonly string AppWillClose = T("TrustTunnel GUI сейчас запущен: он будет закрыт, VPN отключится",
+            "TrustTunnel GUI is running: it will be closed and the VPN disconnected");
+        public static readonly string ClosingApp = T("Закрытие TrustTunnel GUI…", "Closing TrustTunnel GUI…");
+        public static readonly string CloseAppFailed = T("Не удалось закрыть TrustTunnel GUI. Закройте его (значок в области уведомлений → «Выйти») и повторите попытку",
+            "Could not close TrustTunnel GUI. Close it (notification area icon → Quit) and try again");
         public static readonly string FolderEmpty = T("Укажите папку установки", "Choose an install folder");
         public static readonly string UninstallTitle = T("Удаление TrustTunnel GUI", "Uninstall TrustTunnel GUI");
         public static readonly string UninstallDescription = T("Приложение, консольный клиент и ярлыки будут удалены из папки {0}.",
@@ -167,6 +170,37 @@ namespace TrustTunnelSetup
         {
             if (Sandbox) return false;
             return Process.GetProcessesByName("TrustTunnelGUI").Length > 0 || Process.GetProcessesByName("trusttunnel_client").Length > 0;
+        }
+
+        // Closes the app so its files can be replaced. Since 1.2.5 the app quits on a signal and disconnects by itself;
+        // an older one is ended, and its client gets Ctrl+C first so that it restores routes and DNS.
+        public static void CloseApp(Action<double, string> progress)
+        {
+            if (!AppIsRunning()) return;
+            progress(0, S.ClosingApp);
+            try { EventWaitHandle.OpenExisting(@"Local\TrustTunnelGUI_Exit").Set(); } catch { }
+            WaitForExit("TrustTunnelGUI", 15000);
+            foreach (var p in Process.GetProcessesByName("TrustTunnelGUI"))
+                using (p) try { p.Kill(); p.WaitForExit(5000); } catch { }
+            // Without the app nothing restarts the client; stop it the way the app does.
+            foreach (var p in Process.GetProcessesByName("trusttunnel_client"))
+                using (p)
+                {
+                    try
+                    {
+                        if (ConsoleCtrl.SendCtrlC(p.Id) && p.WaitForExit(8000)) continue;
+                        if (!p.HasExited) p.Kill();
+                        p.WaitForExit(3000);
+                    }
+                    catch { }
+                }
+            if (AppIsRunning()) throw new InvalidOperationException(S.CloseAppFailed);
+        }
+
+        static void WaitForExit(string name, int timeoutMs)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (Process.GetProcessesByName(name).Length > 0 && DateTime.UtcNow < deadline) Thread.Sleep(200);
         }
 
         public static void CreateShortcut(string lnk, string target)
@@ -428,7 +462,8 @@ namespace TrustTunnelSetup
             _updateFrom = updateFrom;
             Title = uninstall ? S.UninstallTitle : S.Title;
             Width = 680;
-            Height = 520;
+            // Room for both notes on the update page (version and running app) and an error line.
+            Height = 580;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Background = C.BackgroundSystem;
@@ -497,6 +532,14 @@ namespace TrustTunnelSetup
             return t;
         }
 
+        static void AddRunningNote(StackPanel body)
+        {
+            if (!Product.AppIsRunning()) return;
+            var note = UI.BodyMedium(S.AppWillClose, C.AccentText);
+            note.Margin = new Thickness(0, 8, 0, 0);
+            body.Children.Add(note);
+        }
+
         static void ShowError(TextBlock target, string message)
         {
             target.Text = message;
@@ -513,6 +556,7 @@ namespace TrustTunnelSetup
                 note.Margin = new Thickness(0, 8, 0, 0);
                 body.Children.Add(note);
             }
+            AddRunningNote(body);
 
             var label = UI.Text(S.InstallFolder, 13, FontWeights.SemiBold, C.NeutralDark);
             label.Margin = new Thickness(0, 24, 0, 6);
@@ -547,11 +591,10 @@ namespace TrustTunnelSetup
             {
                 var dir = path.Text.Trim();
                 if (dir.Length == 0) { ShowError(error, S.FolderEmpty); return; }
-                if (Product.AppIsRunning()) { ShowError(error, S.CloseApp); return; }
                 _dir = dir;
                 // Read the controls here: the work runs on another thread and must not touch them.
                 bool desktopShortcut = desktop.IsChecked == true;
-                RunWork(S.Installing, delegate(Action<double, string> p) { Engine.Install(dir, desktopShortcut, p); },
+                RunWork(S.Installing, delegate(Action<double, string> p) { Product.CloseApp(p); Engine.Install(dir, desktopShortcut, p); },
                     delegate { ShowDonePage(string.Format(S.Installed, Product.Version), S.InstalledHint, launch.IsChecked == true); });
             });
             install.IsDefault = true;
@@ -565,18 +608,16 @@ namespace TrustTunnelSetup
             title.Margin = new Thickness(0, 0, 0, 8);
             body.Children.Add(title);
             body.Children.Add(UI.BodyMedium(string.Format(S.UninstallDescription, _dir), C.NeutralDark));
+            AddRunningNote(body);
             var removeData = new CheckBox { Style = UI.S("Check"), Content = S.RemoveData, Margin = new Thickness(-10, 16, 0, 0) };
             body.Children.Add(removeData);
-            var error = ErrorText();
-            body.Children.Add(error);
 
             var cancel = UI.TextButton(S.Cancel, Close);
             var remove = UI.Filled(S.Uninstall, delegate
             {
-                if (Product.AppIsRunning()) { ShowError(error, S.CloseApp); return; }
                 bool data = removeData.IsChecked == true;
                 var dir = _dir;
-                RunWork(S.Uninstalling, delegate(Action<double, string> p) { Engine.Uninstall(dir, data, p); },
+                RunWork(S.Uninstalling, delegate(Action<double, string> p) { Product.CloseApp(p); Engine.Uninstall(dir, data, p); },
                     delegate { ShowDonePage(S.Uninstalled, null, false); });
             }, true);
             SetPage(body, cancel, remove);
@@ -693,6 +734,7 @@ namespace TrustTunnelSetup
             var shots = new List<KeyValuePair<string, Func<SetupWindow>>>
             {
                 new KeyValuePair<string, Func<SetupWindow>>("setup_welcome", delegate { return new SetupWindow(false, Product.DefaultDir, null); }),
+                new KeyValuePair<string, Func<SetupWindow>>("setup_update", delegate { return new SetupWindow(false, Product.DefaultDir, "1.2.4"); }),
                 new KeyValuePair<string, Func<SetupWindow>>("setup_progress", delegate { var w = new SetupWindow(false, Product.DefaultDir, null); w.Loaded += delegate { w.DevShow("progress"); }; return w; }),
                 new KeyValuePair<string, Func<SetupWindow>>("setup_done", delegate { var w = new SetupWindow(false, Product.DefaultDir, null); w.Loaded += delegate { w.DevShow("done"); }; return w; }),
                 new KeyValuePair<string, Func<SetupWindow>>("setup_uninstall", delegate { return new SetupWindow(true, Product.DefaultDir, null); })

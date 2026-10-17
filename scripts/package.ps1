@@ -35,7 +35,7 @@ $references = @(
 ) | ForEach-Object { "/r:$_" }
 
 $appSources = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
-$setupSources = @((Join-Path $root 'installer\Setup.cs'), (Join-Path $root 'src\Theme.cs'))
+$setupSources = @((Join-Path $root 'installer\Setup.cs'), (Join-Path $root 'src\Theme.cs'), (Join-Path $root 'src\ConsoleCtrl.cs'))
 
 function Invoke-Csc([string]$Out, [string]$Manifest, [string[]]$Sources, [string[]]$Resources, [string]$Define) {
     New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null

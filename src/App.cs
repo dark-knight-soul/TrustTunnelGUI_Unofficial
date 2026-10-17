@@ -24,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.5.0")]
-[assembly: AssemblyFileVersion("1.2.5.0")]
+[assembly: AssemblyVersion("1.2.6.0")]
+[assembly: AssemblyFileVersion("1.2.6.0")]
 
 namespace TrustTunnelGui
 {
@@ -42,6 +42,8 @@ namespace TrustTunnelGui
 
         const string MutexName = "Local\\TrustTunnelGUI_Instance";
         const string ShowEventName = "Local\\TrustTunnelGUI_Show";
+        // Set by the installer before an update: quit and disconnect without asking.
+        const string ExitEventName = "Local\\TrustTunnelGUI_Exit";
 
         public string LogDir;
         public Store Store;
@@ -261,6 +263,17 @@ namespace TrustTunnelGui
                 }) { IsBackground = true };
                 waiter.Start();
             }
+            try
+            {
+                var exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitEventName);
+                new Thread(delegate()
+                {
+                    exitEvent.WaitOne();
+                    Log.Write("Exit requested by the installer");
+                    Dispatcher.BeginInvoke(new Action(DoExit));
+                }) { IsBackground = true }.Start();
+            }
+            catch (Exception ex) { Log.Write("Exit event unavailable: " + ex.Message); }
 
             // Follow the Windows light/dark setting while the theme is "system".
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += delegate(object s, Microsoft.Win32.UserPreferenceChangedEventArgs e)

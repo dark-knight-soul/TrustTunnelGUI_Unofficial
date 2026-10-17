@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -605,40 +604,6 @@ namespace TrustTunnelGui
             {
                 entry.SetTraffic(long.Parse(x.Groups[1].Value), long.Parse(x.Groups[2].Value));
                 _open.Remove(key);
-            }
-        }
-    }
-
-    static class ConsoleCtrl
-    {
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool AttachConsole(uint dwProcessId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool FreeConsole();
-
-        [DllImport("kernel32.dll")]
-        static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
-
-        [DllImport("kernel32.dll")]
-        static extern bool GenerateConsoleCtrlEvent(uint ctrlEvent, uint processGroupId);
-
-        static readonly object Sync = new object();
-
-        // Sends Ctrl+C to a console process started with CreateNoWindow (it owns a hidden console).
-        public static bool SendCtrlC(int pid)
-        {
-            lock (Sync)
-            {
-                FreeConsole();
-                if (!AttachConsole((uint)pid)) return false;
-                SetConsoleCtrlHandler(IntPtr.Zero, true); // do not terminate ourselves
-                bool ok = GenerateConsoleCtrlEvent(0, 0);
-                FreeConsole();
-                // The event is delivered asynchronously; keep ignoring it for a moment.
-                Thread.Sleep(300);
-                SetConsoleCtrlHandler(IntPtr.Zero, false);
-                return ok;
             }
         }
     }
