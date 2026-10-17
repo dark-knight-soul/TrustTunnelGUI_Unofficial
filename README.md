@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/badges/version.svg" alt="version 1.2.6">
+  <img src="docs/badges/version.svg" alt="version 1.2.7">
   <img src="docs/badges/windows.svg" alt="Windows 10 | 11">
   <img src="docs/badges/dotnet.svg" alt=".NET Framework 4.8">
   <img src="docs/badges/license.svg" alt="license Apache-2.0">
@@ -57,7 +57,8 @@
 - **Запуск.** Автозапуск при входе в систему, автоподключение, kill switch. Права администратора запрашиваются только для режима VPN (TUN).
 - **Расширенные настройки.** anti-DPI, отключение проверки сертификата, MTU, системный DNS, постквантовый обмен ключами.
 - **Резервная копия.** Экспорт и импорт серверов и профилей; пароли — только в зашифрованном виде.
-- **Обновления.** Проверка новой версии на GitHub.
+- **Обновления.** Установленная версия сама загружает новый релиз с GitHub, проверяет его контрольную сумму (SHA-256)
+  и после подтверждения обновляется с перезапуском; подключение VPN восстанавливается. Portable-версия открывает страницу релиза.
 - **Надёжность.** Клиент останавливается через Ctrl+C, чтобы восстановить маршруты и DNS. Пароли хранятся
   в зашифрованном виде (DPAPI), а конфигурация с паролем существует на диске только пока клиент работает.
 
@@ -68,8 +69,8 @@
 
 | Вариант | Файл | Для чего |
 |---|---|---|
-| **Установщик** | `TrustTunnelGUI-1.2.6-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
-| **Portable** | `TrustTunnelGUI-1.2.6-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
+| **Установщик** | `TrustTunnelGUI-1.2.7-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
+| **Portable** | `TrustTunnelGUI-1.2.7-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
 
 Нужна Windows 10 или 11 (x64); .NET Framework 4.8 уже входит в систему.
 
@@ -81,7 +82,7 @@
 Установщик поддерживает тихий режим для автоматизации:
 
 ```bat
-TrustTunnelGUI-1.2.6-setup.exe --silent
+TrustTunnelGUI-1.2.7-setup.exe --silent
 "C:\Program Files\TrustTunnel GUI\uninstall.exe" --uninstall --silent
 ```
 
@@ -220,10 +221,10 @@ scripts\build.cmd
 ```
 dist/
 ├── portable/
-│   ├── TrustTunnelGUI-1.2.6-portable/      готовая к запуску папка
-│   └── TrustTunnelGUI-1.2.6-portable.zip
+│   ├── TrustTunnelGUI-1.2.7-portable/      готовая к запуску папка
+│   └── TrustTunnelGUI-1.2.7-portable.zip
 └── installer/
-    └── TrustTunnelGUI-1.2.6-setup.exe
+    └── TrustTunnelGUI-1.2.7-setup.exe
 ```
 
 Отладочная сборка `scripts\build.cmd -Dev` создаёт `dist\dev\TrustTunnelGUI.dev.exe` с самотестами:
@@ -234,6 +235,8 @@ dist/
 | `--test-config <sample.toml> <папка>` | проверяет генерацию и разбор TOML и валидацию полей |
 | `--test-vpn <config.toml> <result.txt>` | полный цикл: запуск клиента, отслеживание состояния, остановка через Ctrl+C |
 | `--print-paths <файл>` | показывает найденные пути клиента и данных |
+| `--print-network <файл>` | показывает отпечаток сети, по которому замечается её смена |
+| `--test-update <result.txt>` | загружает установщик последнего релиза и проверяет контрольную сумму и блокировку файла (не запускает его) |
 | `--test-features <папка>` | журнал подключений, резервная копия, пинг, проверка обновлений, расширенные параметры |
 
 Отладочный установщик `dist\dev\Setup.dev.exe --render <папка> [--theme light|dark]` рендерит свои экраны.
@@ -251,8 +254,8 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) собир
   предупреждать, когда у сертификата накопится репутация. Без секретов шаг пропускается.
 
 ```bat
-git tag v1.2.6
-git push origin v1.2.6
+git tag v1.2.7
+git push origin v1.2.7
 ```
 
 ## Где хранятся данные

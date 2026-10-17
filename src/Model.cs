@@ -76,6 +76,7 @@ namespace TrustTunnelGui
         public bool AutoReconnect = true;
         public bool CheckUpdates = true;
         public long LastUpdateCheck = 0;    // UTC ticks
+        public string ResumeServerId = "";  // connected when an update was installed: reconnect after the restart
         public int Mtu = Defaults.Mtu;
         public bool PostQuantum = true;
         public bool ChangeSystemDns = true;

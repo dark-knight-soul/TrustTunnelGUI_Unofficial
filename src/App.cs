@@ -24,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.6.0")]
-[assembly: AssemblyFileVersion("1.2.6.0")]
+[assembly: AssemblyVersion("1.2.7.0")]
+[assembly: AssemblyFileVersion("1.2.7.0")]
 
 namespace TrustTunnelGui
 {
@@ -58,6 +58,8 @@ namespace TrustTunnelGui
         const int MaxReconnectAttempts = 10;
         DispatcherTimer _networkTimer;
         string _clientNetwork;   // Net.NetworkFingerprint() when the client was started
+        DispatcherTimer _updateTimer;
+        bool _updateBusy;
         string _clientVersion;
         static Mutex _mutex;
         bool _autostart;
@@ -165,6 +167,12 @@ namespace TrustTunnelGui
 
         public static bool IsPortable;
 
+        // Installed by setup (it puts uninstall.exe next to the app): such a copy can update itself.
+        public static bool IsInstalled
+        {
+            get { return !IsPortable && File.Exists(Path.Combine(Path.GetDirectoryName(ExePath), "uninstall.exe")); }
+        }
+
         public static void InitPaths()
         {
             ExePath = Assembly.GetExecutingAssembly().Location;
@@ -224,6 +232,14 @@ namespace TrustTunnelGui
             L.Apply(settings.Language);
 
             if (settings.RunAsAdmin && !IsElevated && RestartElevated(connectServerId)) return false;
+
+            // Started again by the installer after an update that interrupted a connection.
+            if (!string.IsNullOrEmpty(settings.ResumeServerId))
+            {
+                if (connectServerId == null) connectServerId = settings.ResumeServerId;
+                settings.ResumeServerId = "";
+                Store.Save();
+            }
 
             // Before 1.2.4 a portable copy could get an elevated logon task; it becomes a normal Run key entry.
             if (IsElevated && !Autostart.IsProtectedLocation(ExePath) && Autostart.TaskExists()) Autostart.Set(true, ExePath);
@@ -292,24 +308,48 @@ namespace TrustTunnelGui
                 toConnect = Store.Server(settings.SelectedServerId) ?? Store.Data.Servers.FirstOrDefault();
             if (toConnect != null) Connect(toConnect);
 
-            if (settings.CheckUpdates && DateTime.UtcNow - new DateTime(settings.LastUpdateCheck, DateTimeKind.Utc) > TimeSpan.FromDays(1))
-                Dispatcher.BeginInvoke(new Action(delegate { CheckForUpdates(false); }), DispatcherPriority.ApplicationIdle);
+            ThreadPool.QueueUserWorkItem(delegate { Updater.CleanUp(); });
+            Dispatcher.BeginInvoke(new Action(CheckForUpdatesIfDue), DispatcherPriority.ApplicationIdle);
+            // The app may stay in the tray for days.
+            _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
+            _updateTimer.Tick += delegate { CheckForUpdatesIfDue(); };
+            _updateTimer.Start();
             return true;
         }
 
         // ---- Updates ----
 
+        void CheckForUpdatesIfDue()
+        {
+            var settings = Store.Data.Settings;
+            if (settings.CheckUpdates && DateTime.UtcNow - new DateTime(settings.LastUpdateCheck, DateTimeKind.Utc) > TimeSpan.FromDays(1))
+                CheckForUpdates(false);
+        }
+
         public void CheckForUpdates(bool manual)
         {
+            if (_updateBusy)
+            {
+                if (manual) Window.ShowSnack(L.CheckingUpdates);
+                return;
+            }
+            _updateBusy = true;
+            if (manual) Window.ShowSnack(L.CheckingUpdates);
             ThreadPool.QueueUserWorkItem(delegate
             {
                 ReleaseInfo release = null;
+                string setup = null;
                 Exception error = null;
-                try { release = UpdateChecker.Latest(); }
+                try
+                {
+                    release = UpdateChecker.Latest();
+                    if (UpdateChecker.IsNewer(release) && Updater.CanInstall(release)) setup = Updater.Download(release);
+                }
                 catch (Exception ex) { error = ex; }
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
-                    if (error != null)
+                    _updateBusy = false;
+                    if (error != null && !UpdateChecker.IsNewer(release))
                     {
                         Log.Write("Update check failed: " + error.Message);
                         if (manual) Window.ShowSnack(L.UpdateCheckFailed);
@@ -322,6 +362,13 @@ namespace TrustTunnelGui
                         if (manual) Window.ShowSnack(L.UpToDate);
                         return;
                     }
+                    if (setup != null)
+                    {
+                        OfferUpdate(release, setup);
+                        return;
+                    }
+                    // A portable copy, or the installer could not be downloaded and checked: offer the release page.
+                    if (error != null) Log.Write("Update download failed: " + error.Message);
                     var url = release.Url;
                     if (!Window.IsVisible && !manual)
                     {
@@ -333,6 +380,45 @@ namespace TrustTunnelGui
                         new DialogAction(L.Download, delegate { OpenUrl(url); return true; }) { IsDefault = true });
                 }));
             });
+        }
+
+        void OfferUpdate(ReleaseInfo release, string setup)
+        {
+            var version = release.Version.ToString(3);
+            Log.Write("Update " + version + " downloaded");
+            Action ask = delegate
+            {
+                ShowMainWindow();
+                Window.ShowDialog(string.Format(L.UpdateReady, version), UI.BodyMedium(L.UpdateReadyDescription),
+                    DialogAction.Cancel(L.Later),
+                    new DialogAction(L.RestartToUpdate, delegate { Dispatcher.BeginInvoke(new Action(delegate { InstallUpdate(release, setup); })); return true; }) { IsDefault = true });
+            };
+            if (Window.IsVisible) ask();
+            else _tray.Balloon(L.AppName, string.Format(L.UpdateReadyBalloon, version), false, ask);
+        }
+
+        void InstallUpdate(ReleaseInfo release, string setup)
+        {
+            var settings = Store.Data.Settings;
+            bool active = IsReconnecting || Vpn.State == VpnState.Connected || Vpn.State == VpnState.Connecting;
+            settings.ResumeServerId = active && Vpn.ActiveServerId != null ? Vpn.ActiveServerId : "";
+            Store.Save();
+            try
+            {
+                Updater.Start(setup, release);
+            }
+            catch (Exception ex)
+            {
+                settings.ResumeServerId = "";
+                Store.Save();
+                Log.Write("Update failed to start: " + ex.Message);
+                var declined = ex is System.ComponentModel.Win32Exception && ((System.ComponentModel.Win32Exception)ex).NativeErrorCode == 1223;
+                Window.ShowSnack(declined ? L.UpdateCancelled : L.UpdateFailed);
+                return;
+            }
+            Log.Write("Installing update " + release.Tag);
+            // The installer waits for this exit, then installs and starts the new version.
+            DoExit();
         }
 
         // ---- Auto-reconnect ----

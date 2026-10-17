@@ -130,12 +130,19 @@ namespace TrustTunnelGui
 
         public static string Updates = "Обновления";
         public static string CheckUpdates = "Проверять обновления";
-        public static string CheckUpdatesDescription = "Раз в день проверять новую версию на GitHub";
+        public static string CheckUpdatesDescription = "Раз в день проверять новую версию на GitHub и загружать её";
         public static string CheckForUpdates = "Проверить обновления";
         public static string UpdateAvailable = "Доступна версия {0}";
         public static string UpdateDescription = "У вас установлена версия {0}. Скачать новую версию со страницы релизов?";
         public static string UpToDate = "Установлена последняя версия";
         public static string UpdateCheckFailed = "Не удалось проверить обновления";
+        public static string CheckingUpdates = "Проверка обновлений…";
+        public static string UpdateReady = "Обновление {0} готово";
+        public static string UpdateReadyDescription = "Приложение перезапустится. Если VPN подключён, он ненадолго отключится и подключится снова.";
+        public static string UpdateReadyBalloon = "Версия {0} загружена. Нажмите, чтобы установить";
+        public static string RestartToUpdate = "Перезапустить";
+        public static string UpdateCancelled = "Обновление отменено";
+        public static string UpdateFailed = "Не удалось запустить обновление";
         public static string Later = "Позже";
         public static string Download = "Скачать";
 
@@ -332,10 +339,14 @@ namespace TrustTunnelGui
             { "ReconnectGaveUp", "Could not restore the connection" }, { "NetworkChanged", "Network changed. Reconnecting…" },
             { "AutoReconnect", "Auto-reconnect" },
             { "AutoReconnectDescription", "Restore the connection if the client stops unexpectedly" },
-            { "Updates", "Updates" }, { "CheckUpdates", "Check for updates" }, { "CheckUpdatesDescription", "Look for a new version on GitHub once a day" },
+            { "Updates", "Updates" }, { "CheckUpdates", "Check for updates" }, { "CheckUpdatesDescription", "Look for a new version on GitHub once a day and download it" },
             { "CheckForUpdates", "Check for updates" }, { "UpdateAvailable", "Version {0} is available" },
             { "UpdateDescription", "You have version {0}. Download the new version from the releases page?" },
             { "UpToDate", "You have the latest version" }, { "UpdateCheckFailed", "Could not check for updates" },
+            { "CheckingUpdates", "Checking for updates…" }, { "UpdateReady", "Update {0} is ready" },
+            { "UpdateReadyDescription", "The app will restart. If the VPN is connected, it disconnects briefly and connects again." },
+            { "UpdateReadyBalloon", "Version {0} has been downloaded. Click to install" }, { "RestartToUpdate", "Restart" },
+            { "UpdateCancelled", "The update was cancelled" }, { "UpdateFailed", "Could not start the update" },
             { "Later", "Later" }, { "Download", "Download" },
             { "Advanced", "Advanced" }, { "AntiDpiDescription", "Enable measures against deep packet inspection" },
             { "SkipVerification", "Do not verify the server certificate" }, { "SkipVerificationDescription", "Accept any server certificate" },

@@ -23,8 +23,8 @@ using TrustTunnelGui;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.6.0")]
-[assembly: AssemblyFileVersion("1.2.6.0")]
+[assembly: AssemblyVersion("1.2.7.0")]
+[assembly: AssemblyFileVersion("1.2.7.0")]
 
 namespace TrustTunnelSetup
 {
@@ -384,9 +384,17 @@ namespace TrustTunnelSetup
         }
 
         // Started through explorer.exe so the app runs with the user's normal rights, not the installer's.
-        public static void Launch(string dir)
+        // Through Explorer the app starts with normal rights; elevated = keep the installer's rights, for an app
+        // that was already running as administrator before an update.
+        public static void Launch(string dir, bool elevated = false)
         {
-            try { Process.Start("explorer.exe", "\"" + Path.Combine(dir, Product.Exe) + "\""); } catch { }
+            var exe = Path.Combine(dir, Product.Exe);
+            try
+            {
+                if (elevated) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = dir });
+                else Process.Start("explorer.exe", "\"" + exe + "\"");
+            }
+            catch { }
         }
     }
 
@@ -401,6 +409,7 @@ namespace TrustTunnelSetup
             bool installed = Product.FindInstalled(out installedDir, out installedVersion);
 
             if (silent) return RunSilent(uninstall, installed ? installedDir : Product.DefaultDir);
+            if (args.Contains("--update")) return RunUpdate(installed ? installedDir : Product.DefaultDir, args.Contains("--run-elevated"));
 
             var app = new SetupApp { ShutdownMode = ShutdownMode.OnMainWindowClose };
             Theme.Install(app, "system");
@@ -439,6 +448,26 @@ namespace TrustTunnelSetup
             }
             catch
             {
+                return 1;
+            }
+        }
+
+        // Started by the app with the update it downloaded: no pages, the app is closed and started again.
+        static int RunUpdate(string dir, bool elevated)
+        {
+            Action<double, string> none = delegate { };
+            try
+            {
+                Product.CloseApp(none);
+                Engine.Install(dir, File.Exists(Product.DesktopShortcut), none);
+                Engine.Launch(dir, elevated);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(S.Failed + ": " + ex.Message, S.Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                // The previous version is usually still in place.
+                Engine.Launch(dir, elevated);
                 return 1;
             }
         }

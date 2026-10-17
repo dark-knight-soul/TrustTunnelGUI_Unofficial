@@ -26,6 +26,7 @@ namespace TrustTunnelGui
             if (args.Length >= 3 && args[0] == "--test-vpn") { TestVpn(args[1], args[2]); return true; }
             if (args.Length >= 2 && args[0] == "--test-features") { TestFeatures(args[1]); return true; }
             if (args.Length >= 3 && args[0] == "--test-ping-ui") { TestPingUi(args[1], args[2]); return true; }
+            if (args.Length >= 2 && args[0] == "--test-update") { TestUpdate(args[1]); return true; }
             if (args.Length >= 2 && args[0] == "--print-network")
             {
                 File.WriteAllText(args[1], Net.NetworkFingerprint() + "\n");
@@ -38,6 +39,45 @@ namespace TrustTunnelGui
                 return true;
             }
             return false;
+        }
+
+        // Update download from the latest GitHub release: asset fields, checksum, rejection of a wrong digest,
+        // and the lock that keeps the checked installer from being replaced. The installer is not started.
+        static void TestUpdate(string resultFile)
+        {
+            var sb = new StringBuilder();
+            try
+            {
+                var release = UpdateChecker.Latest();
+                sb.AppendLine("latest " + release.Tag + " setup=" + release.SetupName + " size=" + release.SetupSize + " sha256=" + release.SetupSha256);
+                sb.AppendLine("url " + release.SetupUrl);
+                sb.AppendLine("installed copy: " + App.IsInstalled + ", can install here: " + Updater.CanInstall(release));
+                var path = Updater.Download(release);
+                sb.AppendLine("downloaded " + path + " (" + new FileInfo(path).Length + " bytes)");
+
+                using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    try { using (new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) { } sb.AppendLine("FAIL write while locked"); }
+                    catch (IOException) { sb.AppendLine("write while locked: refused"); }
+                    try { File.Delete(path); sb.AppendLine("FAIL delete while locked"); }
+                    catch (IOException) { sb.AppendLine("delete while locked: refused"); }
+                    catch (UnauthorizedAccessException) { sb.AppendLine("delete while locked: refused"); }
+                }
+
+                var wrong = new ReleaseInfo { Version = release.Version, Tag = release.Tag, SetupName = release.SetupName, SetupUrl = release.SetupUrl,
+                    SetupSize = release.SetupSize, SetupSha256 = new string('0', 64) };
+                try { Updater.Download(wrong); sb.AppendLine("FAIL wrong digest accepted"); }
+                catch (IOException ex) { sb.AppendLine("wrong digest: " + ex.Message); }
+                var small = new ReleaseInfo { Version = release.Version, Tag = release.Tag, SetupName = release.SetupName, SetupUrl = release.SetupUrl,
+                    SetupSize = 1000, SetupSha256 = release.SetupSha256 };
+                try { Updater.Download(small); sb.AppendLine("FAIL oversized download accepted"); }
+                catch (IOException ex) { sb.AppendLine("oversized: " + ex.Message); }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("FAIL " + ex);
+            }
+            File.WriteAllText(resultFile, sb.ToString());
         }
 
         // Full VpnManager cycle with a SOCKS listener config (no TUN, no system changes).

@@ -177,6 +177,11 @@ namespace TrustTunnelGui
         public Version Version;
         public string Tag;
         public string Url;
+        // The installer asset; SetupSha256 is null when GitHub gives no digest, and then it is not installed automatically.
+        public string SetupName;
+        public string SetupUrl;
+        public long SetupSize;
+        public string SetupSha256;
     }
 
     // Looks for a newer release on GitHub.
@@ -200,13 +205,125 @@ namespace TrustTunnelGui
                 var tag = Convert.ToString(json["tag_name"], CultureInfo.InvariantCulture);
                 Version version;
                 if (!Version.TryParse(tag.TrimStart('v', 'V').Split('-')[0], out version)) return null;
-                return new ReleaseInfo { Version = version, Tag = tag, Url = Convert.ToString(json["html_url"], CultureInfo.InvariantCulture) };
+                var release = new ReleaseInfo { Version = version, Tag = tag, Url = Convert.ToString(json["html_url"], CultureInfo.InvariantCulture) };
+                var setupName = "TrustTunnelGUI-" + tag.TrimStart('v', 'V') + "-setup.exe";
+                object assets;
+                if (json.TryGetValue("assets", out assets) && assets is System.Collections.IEnumerable)
+                {
+                    foreach (var item in (System.Collections.IEnumerable)assets)
+                    {
+                        var asset = item as Dictionary<string, object>;
+                        if (asset == null || Field(asset, "name") != setupName) continue;
+                        release.SetupName = setupName;
+                        release.SetupUrl = Field(asset, "browser_download_url");
+                        release.SetupSize = Convert.ToInt64(asset["size"], CultureInfo.InvariantCulture);
+                        var digest = Field(asset, "digest");
+                        if (digest != null && digest.StartsWith("sha256:", StringComparison.Ordinal))
+                            release.SetupSha256 = digest.Substring(7).ToLowerInvariant();
+                    }
+                }
+                return release;
             }
+        }
+
+        static string Field(Dictionary<string, object> json, string key)
+        {
+            object value;
+            return json.TryGetValue(key, out value) && value != null ? Convert.ToString(value, CultureInfo.InvariantCulture) : null;
         }
 
         public static bool IsNewer(ReleaseInfo release)
         {
             return release != null && release.Version > new Version(App.Version);
+        }
+    }
+
+    // Downloads the installer of a release and runs it in update mode (it closes the app, installs and starts it again).
+    // The file is checked against the SHA-256 digest GitHub publishes for the asset.
+    static class Updater
+    {
+        const string DirPrefix = "TrustTunnelGUI-update-";
+
+        // Only an installed copy updates itself; a portable one keeps opening the release page.
+        public static bool CanInstall(ReleaseInfo release)
+        {
+            return App.IsInstalled && release.SetupSha256 != null && release.SetupSize > 0 &&
+                   release.SetupUrl != null && release.SetupUrl.StartsWith(UpdateChecker.RepoUrl + "/releases/download/", StringComparison.Ordinal);
+        }
+
+        // Each download gets a new folder, so nothing prepared in advance can stand in for it.
+        public static string Download(ReleaseInfo release)
+        {
+            var dir = Path.Combine(Path.GetTempPath(), DirPrefix + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                return Download(release, Path.Combine(dir, release.SetupName));
+            }
+            catch
+            {
+                try { Directory.Delete(dir, true); } catch { }
+                throw;
+            }
+        }
+
+        static string Download(ReleaseInfo release, string path)
+        {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            var request = (HttpWebRequest)WebRequest.Create(release.SetupUrl);
+            request.UserAgent = "TrustTunnelGUI/" + App.Version;
+            request.Timeout = 15000;
+            request.ReadWriteTimeout = 30000;
+            using (var response = (HttpWebResponse)request.GetResponse())
+            {
+                if (response.ResponseUri.Scheme != Uri.UriSchemeHttps) throw new IOException("Download redirected to " + response.ResponseUri.Scheme);
+                using (var src = response.GetResponseStream())
+                using (var dst = File.Create(path))
+                {
+                    var buffer = new byte[81920];
+                    long total = 0;
+                    int read;
+                    while ((read = src.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        total += read;
+                        if (total > release.SetupSize) throw new IOException("The download is larger than expected");
+                        dst.Write(buffer, 0, read);
+                    }
+                }
+            }
+            using (var file = File.OpenRead(path))
+                if (!Matches(file, release)) throw new IOException("Checksum mismatch");
+            return path;
+        }
+
+        // The file stays open without write or delete sharing until the installer has started: nothing can swap it
+        // after the check (an elevated app starts it without a UAC prompt). Throws Win32Exception if UAC is declined.
+        public static void Start(string path, ReleaseInfo release)
+        {
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                if (!Matches(file, release)) throw new IOException("Checksum mismatch");
+                var args = "--update" + (App.IsElevated ? " --run-elevated" : "");
+                Process.Start(new ProcessStartInfo(path, args) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(path) });
+            }
+        }
+
+        // Folders of earlier updates; the one of a running installer is skipped.
+        public static void CleanUp()
+        {
+            try
+            {
+                foreach (var dir in Directory.GetDirectories(Path.GetTempPath(), DirPrefix + "*"))
+                    try { Directory.Delete(dir, true); } catch { }
+            }
+            catch { }
+        }
+
+        static bool Matches(Stream file, ReleaseInfo release)
+        {
+            if (file.Length != release.SetupSize) return false;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant() == release.SetupSha256;
         }
     }
 }
