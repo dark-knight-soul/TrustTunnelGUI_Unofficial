@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/badges/version.svg" alt="version 1.2.7">
+  <img src="docs/badges/version.svg" alt="version 1.2.8">
   <img src="docs/badges/windows.svg" alt="Windows 10 | 11">
   <img src="docs/badges/dotnet.svg" alt=".NET Framework 4.8">
   <img src="docs/badges/license.svg" alt="license Apache-2.0">
@@ -69,8 +69,8 @@
 
 | Вариант | Файл | Для чего |
 |---|---|---|
-| **Установщик** | `TrustTunnelGUI-1.2.7-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
-| **Portable** | `TrustTunnelGUI-1.2.7-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
+| **Установщик** | `TrustTunnelGUI-1.2.8-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
+| **Portable** | `TrustTunnelGUI-1.2.8-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
 
 Нужна Windows 10 или 11 (x64); .NET Framework 4.8 уже входит в систему.
 
@@ -82,7 +82,7 @@
 Установщик поддерживает тихий режим для автоматизации:
 
 ```bat
-TrustTunnelGUI-1.2.7-setup.exe --silent
+TrustTunnelGUI-1.2.8-setup.exe --silent
 "C:\Program Files\TrustTunnel GUI\uninstall.exe" --uninstall --silent
 ```
 
@@ -221,10 +221,10 @@ scripts\build.cmd
 ```
 dist/
 ├── portable/
-│   ├── TrustTunnelGUI-1.2.7-portable/      готовая к запуску папка
-│   └── TrustTunnelGUI-1.2.7-portable.zip
+│   ├── TrustTunnelGUI-1.2.8-portable/      готовая к запуску папка
+│   └── TrustTunnelGUI-1.2.8-portable.zip
 └── installer/
-    └── TrustTunnelGUI-1.2.7-setup.exe
+    └── TrustTunnelGUI-1.2.8-setup.exe
 ```
 
 Отладочная сборка `scripts\build.cmd -Dev` создаёт `dist\dev\TrustTunnelGUI.dev.exe` с самотестами:
@@ -237,6 +237,7 @@ dist/
 | `--print-paths <файл>` | показывает найденные пути клиента и данных |
 | `--print-network <файл>` | показывает отпечаток сети, по которому замечается её смена |
 | `--test-update <result.txt>` | загружает установщик последнего релиза и проверяет контрольную сумму и блокировку файла (не запускает его) |
+| `--test-recovery <result.txt>` | проверяет, как отслеживается восстановление подключения по строкам журнала клиента |
 | `--test-features <папка>` | журнал подключений, резервная копия, пинг, проверка обновлений, расширенные параметры |
 
 Отладочный установщик `dist\dev\Setup.dev.exe --render <папка> [--theme light|dark]` рендерит свои экраны.
@@ -254,8 +255,8 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) собир
   предупреждать, когда у сертификата накопится репутация. Без секретов шаг пропускается.
 
 ```bat
-git tag v1.2.7
-git push origin v1.2.7
+git tag v1.2.8
+git push origin v1.2.8
 ```
 
 ## Где хранятся данные

@@ -24,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.7.0")]
-[assembly: AssemblyFileVersion("1.2.7.0")]
+[assembly: AssemblyVersion("1.2.8.0")]
+[assembly: AssemblyFileVersion("1.2.8.0")]
 
 namespace TrustTunnelGui
 {
@@ -58,6 +58,9 @@ namespace TrustTunnelGui
         const int MaxReconnectAttempts = 10;
         DispatcherTimer _networkTimer;
         string _clientNetwork;   // Net.NetworkFingerprint() when the client was started
+        DispatcherTimer _recoveryTimer;
+        DateTime _lastNetworkEvent = DateTime.MinValue;   // UTC
+        DateTime _lastAutoRestart = DateTime.MinValue;    // UTC
         DispatcherTimer _updateTimer;
         bool _updateBusy;
         string _clientVersion;
@@ -259,8 +262,16 @@ namespace TrustTunnelGui
             _networkTimer.Tick += delegate { _networkTimer.Stop(); OnNetworkChanged(); };
             System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += delegate
             {
-                Dispatcher.BeginInvoke(new Action(delegate { _networkTimer.Stop(); _networkTimer.Start(); }));
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    _lastNetworkEvent = DateTime.UtcNow;
+                    _networkTimer.Stop();
+                    _networkTimer.Start();
+                }));
             };
+            _recoveryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _recoveryTimer.Tick += delegate { CheckStuckRecovery(); };
+            _recoveryTimer.Start();
 
             Window = new MainWindow();
             _tray = new Tray(this);
@@ -469,10 +480,33 @@ namespace TrustTunnelGui
             }
             if (Vpn.State != VpnState.Connected && Vpn.State != VpnState.Connecting) return;
             var server = Store.Server(Vpn.ActiveServerId);
-            if (server == null) return;
-            Log.Write("Network changed, restarting the client");
-            if (Window.IsVisible) Window.ShowSnack(L.NetworkChanged);
-            Connect(server);
+            if (server != null) RestartClient(server, "Network changed", L.NetworkChanged);
+        }
+
+        // Even on the same network, an adapter that went down for a moment (sleep and wake, Wi-Fi reconnecting) takes
+        // the client's routes to the server with it, and the client never recovers. Restart a client still recovering
+        // 10 s after a network event. Without one (the server is down, say) the client keeps recovering on its own.
+        void CheckStuckRecovery()
+        {
+            var since = Vpn.RecoveringSince;
+            if (since == null || Vpn.State != VpnState.Connecting) return;
+            var now = DateTime.UtcNow;
+            if (now - since.Value < TimeSpan.FromSeconds(10)) return;
+            if (_lastNetworkEvent < since.Value - TimeSpan.FromMinutes(2)) return;
+            if (now - _lastAutoRestart < TimeSpan.FromMinutes(2)) return;
+            if (Net.NetworkFingerprint().Length == 0) return; // offline: wait for the network
+            var server = Store.Server(Vpn.ActiveServerId);
+            if (server != null) RestartClient(server, "No recovery after a network event", L.NetworkRecovering);
+        }
+
+        // Counted as a reconnect attempt: if the new client cannot connect yet, the usual back-off keeps trying.
+        void RestartClient(ServerInfo server, string reason, string message)
+        {
+            Log.Write(reason + ", restarting the client");
+            if (Window.IsVisible) Window.ShowSnack(message);
+            _lastAutoRestart = DateTime.UtcNow;
+            if (_reconnectAttempt == 0) _reconnectAttempt = 1;
+            Connect(server, true);
         }
 
         public void CancelReconnect()

@@ -125,6 +125,7 @@ namespace TrustTunnelGui
         public static string ReconnectingIn = "Соединение потеряно. Переподключение через {0} с";
         public static string ReconnectGaveUp = "Не удалось восстановить подключение";
         public static string NetworkChanged = "Сеть изменилась. Переподключение…";
+        public static string NetworkRecovering = "Связь не восстановилась после сбоя сети. Переподключение…";
         public static string AutoReconnect = "Автопереподключение";
         public static string AutoReconnectDescription = "Восстанавливать подключение, если клиент неожиданно завершился";
 
@@ -337,6 +338,7 @@ namespace TrustTunnelGui
             { "PingServers", "Check ping" }, { "PingRunning", "Checking ping…" }, { "PingLastChecked", "Check ping (last check: {0})" }, { "Unreachable", "unreachable" }, { "PingMs", "{0} ms" },
             { "Reconnecting", "Reconnecting…" }, { "ReconnectingIn", "Connection lost. Reconnecting in {0} s" },
             { "ReconnectGaveUp", "Could not restore the connection" }, { "NetworkChanged", "Network changed. Reconnecting…" },
+            { "NetworkRecovering", "The connection did not recover after a network drop. Reconnecting…" },
             { "AutoReconnect", "Auto-reconnect" },
             { "AutoReconnectDescription", "Restore the connection if the client stops unexpectedly" },
             { "Updates", "Updates" }, { "CheckUpdates", "Check for updates" }, { "CheckUpdatesDescription", "Look for a new version on GitHub once a day and download it" },

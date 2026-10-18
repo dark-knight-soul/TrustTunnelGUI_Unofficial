@@ -27,6 +27,7 @@ namespace TrustTunnelGui
             if (args.Length >= 2 && args[0] == "--test-features") { TestFeatures(args[1]); return true; }
             if (args.Length >= 3 && args[0] == "--test-ping-ui") { TestPingUi(args[1], args[2]); return true; }
             if (args.Length >= 2 && args[0] == "--test-update") { TestUpdate(args[1]); return true; }
+            if (args.Length >= 2 && args[0] == "--test-recovery") { TestRecovery(args[1]); return true; }
             if (args.Length >= 2 && args[0] == "--print-network")
             {
                 File.WriteAllText(args[1], Net.NetworkFingerprint() + "\n");
@@ -39,6 +40,31 @@ namespace TrustTunnelGui
                 return true;
             }
             return false;
+        }
+
+        // RecoveringSince from client state lines: unset while connecting for the first time, set when a working
+        // connection starts recovering, kept through repeated recovery states, cleared when connected again.
+        static void TestRecovery(string resultFile)
+        {
+            var sb = new StringBuilder();
+            var dir = Path.Combine(Path.GetTempPath(), "tt_gui_test");
+            var vpn = new VpnManager(App.ClientExe, Path.Combine(dir, "r.toml"), Path.Combine(dir, "r.log"), Dispatcher.CurrentDispatcher);
+            var handle = typeof(VpnManager).GetMethod("HandleLine", BindingFlags.NonPublic | BindingFlags.Instance);
+            Action<string> feed = delegate(string state)
+            {
+                handle.Invoke(vpn, new object[] { "18.10.2026 03:02:25.422969 INFO  [10760] VPNCORE raise_state: [0] " + state });
+                sb.AppendLine(state + " -> state " + vpn.State + ", recovering " + (vpn.RecoveringSince.HasValue ? "since " + vpn.RecoveringSince.Value.ToString("HH:mm:ss.fff") : "no"));
+            };
+            feed("VPN_SS_CONNECTING");
+            feed("VPN_SS_CONNECTED");
+            feed("VPN_SS_WAITING_RECOVERY");
+            var first = vpn.RecoveringSince;
+            Thread.Sleep(50);
+            feed("VPN_SS_RECOVERING");
+            feed("VPN_SS_WAITING_RECOVERY");
+            sb.AppendLine("start kept through recovery: " + (vpn.RecoveringSince == first));
+            feed("VPN_SS_CONNECTED");
+            File.WriteAllText(resultFile, sb.ToString());
         }
 
         // Update download from the latest GitHub release: asset fields, checksum, rejection of a wrong digest,

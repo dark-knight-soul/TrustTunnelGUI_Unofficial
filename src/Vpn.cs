@@ -49,6 +49,8 @@ namespace TrustTunnelGui
 
         public VpnState State { get; private set; }
         public string ActiveServerId { get; private set; }
+        // UTC time the client lost a working connection and started to recover it; null while connected or stopped.
+        public DateTime? RecoveringSince { get; private set; }
         public readonly List<LogLine> Lines = new List<LogLine>();
         public readonly List<QueryEntry> Queries = new List<QueryEntry>();
 
@@ -160,6 +162,7 @@ namespace TrustTunnelGui
             _lastError = null;
             _reachedConnected = false;
             _coreGaveUp = false;
+            RecoveringSince = null;
             ActiveServerId = serverId;
             SetState(VpnState.Connecting);
             try
@@ -269,9 +272,13 @@ namespace TrustTunnelGui
             {
                 StopDisconnectedTimer();
                 _reachedConnected = true;
+                RecoveringSince = null;
                 SetState(VpnState.Connected);
+                return;
             }
-            else if (text.IndexOf("VPN_SS_DISCONNECTED", idx, StringComparison.Ordinal) >= 0)
+            if (_reachedConnected && RecoveringSince == null && text.IndexOf("VPN_SS_", idx, StringComparison.Ordinal) >= 0)
+                RecoveringSince = DateTime.UtcNow;
+            if (text.IndexOf("VPN_SS_DISCONNECTED", idx, StringComparison.Ordinal) >= 0)
             {
                 // The core gave up; if the process does not exit by itself, stop it.
                 SetState(VpnState.Connecting);
@@ -331,6 +338,7 @@ namespace TrustTunnelGui
             _queryParser.Reset();
             _process = null;
             _stopRequested = false;
+            RecoveringSince = null;
             p.Dispose();
             DeleteConfig();
             AddLine("---- exit code " + code + " ----", code == 0 ? LogLevel.Info : LogLevel.Warn);
