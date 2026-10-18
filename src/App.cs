@@ -24,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.8.0")]
-[assembly: AssemblyFileVersion("1.2.8.0")]
+[assembly: AssemblyVersion("1.2.9.0")]
+[assembly: AssemblyFileVersion("1.2.9.0")]
 
 namespace TrustTunnelGui
 {
@@ -483,20 +483,22 @@ namespace TrustTunnelGui
             if (server != null) RestartClient(server, "Network changed", L.NetworkChanged);
         }
 
-        // Even on the same network, an adapter that went down for a moment (sleep and wake, Wi-Fi reconnecting) takes
-        // the client's routes to the server with it, and the client never recovers. Restart a client still recovering
-        // 10 s after a network event. Without one (the server is down, say) the client keeps recovering on its own.
+        // The client's own recovery sometimes never succeeds (after sleep and wake, a Wi-Fi reconnect): every attempt
+        // fails with "winsock error -1", while a restarted client connects at once. Restart it when recovery hits that
+        // error, or is still going 10 s after a network event. Otherwise (the server is down, say) it keeps recovering.
         void CheckStuckRecovery()
         {
             var since = Vpn.RecoveringSince;
             if (since == null || Vpn.State != VpnState.Connecting) return;
             var now = DateTime.UtcNow;
-            if (now - since.Value < TimeSpan.FromSeconds(10)) return;
-            if (_lastNetworkEvent < since.Value - TimeSpan.FromMinutes(2)) return;
-            if (now - _lastAutoRestart < TimeSpan.FromMinutes(2)) return;
+            string reason;
+            if (Vpn.RecoveryBroken) reason = "Recovery fails with winsock error -1";
+            else if (now - since.Value >= TimeSpan.FromSeconds(10) && _lastNetworkEvent >= since.Value - TimeSpan.FromMinutes(2)) reason = "No recovery after a network event";
+            else return;
+            if (now - _lastAutoRestart < TimeSpan.FromSeconds(30)) return;
             if (Net.NetworkFingerprint().Length == 0) return; // offline: wait for the network
             var server = Store.Server(Vpn.ActiveServerId);
-            if (server != null) RestartClient(server, "No recovery after a network event", L.NetworkRecovering);
+            if (server != null) RestartClient(server, reason, L.NetworkRecovering);
         }
 
         // Counted as a reconnect attempt: if the new client cannot connect yet, the usual back-off keeps trying.

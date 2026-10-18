@@ -51,6 +51,9 @@ namespace TrustTunnelGui
         public string ActiveServerId { get; private set; }
         // UTC time the client lost a working connection and started to recover it; null while connected or stopped.
         public DateTime? RecoveringSince { get; private set; }
+        // The recovery hit "winsock error -1" connecting to the server: every later attempt fails the same way
+        // (seen after sleep and wake) until the client is restarted.
+        public bool RecoveryBroken { get; private set; }
         public readonly List<LogLine> Lines = new List<LogLine>();
         public readonly List<QueryEntry> Queries = new List<QueryEntry>();
 
@@ -163,6 +166,7 @@ namespace TrustTunnelGui
             _reachedConnected = false;
             _coreGaveUp = false;
             RecoveringSince = null;
+            RecoveryBroken = false;
             ActiveServerId = serverId;
             SetState(VpnState.Connecting);
             try
@@ -265,6 +269,8 @@ namespace TrustTunnelGui
             AddLine(text, level);
             if (level == LogLevel.Error) _lastError = StripPrefix(text);
             _queryParser.Feed(text);
+            if (level == LogLevel.Error && RecoveringSince != null && text.Contains("Failed to connect to endpoint: winsock error 0xffffffff"))
+                RecoveryBroken = true;
 
             int idx = text.IndexOf("raise_state:", StringComparison.Ordinal);
             if (idx < 0 || _stopRequested) return;
@@ -273,6 +279,7 @@ namespace TrustTunnelGui
                 StopDisconnectedTimer();
                 _reachedConnected = true;
                 RecoveringSince = null;
+                RecoveryBroken = false;
                 SetState(VpnState.Connected);
                 return;
             }
@@ -339,6 +346,7 @@ namespace TrustTunnelGui
             _process = null;
             _stopRequested = false;
             RecoveringSince = null;
+            RecoveryBroken = false;
             p.Dispose();
             DeleteConfig();
             AddLine("---- exit code " + code + " ----", code == 0 ? LogLevel.Info : LogLevel.Warn);

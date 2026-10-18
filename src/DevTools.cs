@@ -50,12 +50,16 @@ namespace TrustTunnelGui
             var dir = Path.Combine(Path.GetTempPath(), "tt_gui_test");
             var vpn = new VpnManager(App.ClientExe, Path.Combine(dir, "r.toml"), Path.Combine(dir, "r.log"), Dispatcher.CurrentDispatcher);
             var handle = typeof(VpnManager).GetMethod("HandleLine", BindingFlags.NonPublic | BindingFlags.Instance);
-            Action<string> feed = delegate(string state)
+            const string winsockError = "18.10.2026 13:30:45.388522 ERROR [11424] H2_UPSTREAM open_session: [12] Failed to connect to endpoint: winsock error 0xffffffff (-1)";
+            Action<string> line = delegate(string text)
             {
-                handle.Invoke(vpn, new object[] { "18.10.2026 03:02:25.422969 INFO  [10760] VPNCORE raise_state: [0] " + state });
-                sb.AppendLine(state + " -> state " + vpn.State + ", recovering " + (vpn.RecoveringSince.HasValue ? "since " + vpn.RecoveringSince.Value.ToString("HH:mm:ss.fff") : "no"));
+                handle.Invoke(vpn, new object[] { text });
+                sb.AppendLine((text.Contains("raise_state") ? text.Substring(text.IndexOf("VPN_SS_")) : "winsock error -1") + " -> state " + vpn.State +
+                    ", recovering " + (vpn.RecoveringSince.HasValue ? "since " + vpn.RecoveringSince.Value.ToString("HH:mm:ss.fff") : "no") + ", broken " + vpn.RecoveryBroken);
             };
+            Action<string> feed = delegate(string state) { line("18.10.2026 03:02:25.422969 INFO  [10760] VPNCORE raise_state: [0] " + state); };
             feed("VPN_SS_CONNECTING");
+            line(winsockError); // during the first connection: not a broken recovery
             feed("VPN_SS_CONNECTED");
             feed("VPN_SS_WAITING_RECOVERY");
             var first = vpn.RecoveringSince;
@@ -63,6 +67,8 @@ namespace TrustTunnelGui
             feed("VPN_SS_RECOVERING");
             feed("VPN_SS_WAITING_RECOVERY");
             sb.AppendLine("start kept through recovery: " + (vpn.RecoveringSince == first));
+            line(winsockError);
+            feed("VPN_SS_RECOVERING");
             feed("VPN_SS_CONNECTED");
             File.WriteAllText(resultFile, sb.ToString());
         }
