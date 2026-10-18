@@ -326,8 +326,10 @@ namespace TrustTunnelGui
             // 5. Config with advanced options.
             var adv = new AppSettings { Mtu = 1280, PostQuantum = false, ChangeSystemDns = false };
             var cfg = ConfigBuilder.Build(s1, work, adv);
-            foreach (var key in new[] { "post_quantum_group_enabled", "anti_dpi", "skip_verification", "mtu_size", "change_system_dns" })
+            foreach (var key in new[] { "post_quantum_group_enabled", "anti_dpi", "skip_verification", "mtu_size", "change_system_dns", "killswitch_allow_ports" })
                 sb.AppendLine("config " + cfg.Split('\n').First(l => l.StartsWith(key)).Trim());
+            var noKillSwitch = ConfigBuilder.Build(s1, work, new AppSettings { KillSwitch = false });
+            sb.AppendLine("config without kill switch has allow ports: " + noKillSwitch.Contains("killswitch_allow_ports"));
 
             File.WriteAllText(Path.Combine(outDir, "test_features.txt"), sb.ToString(), new UTF8Encoding(false));
         }

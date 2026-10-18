@@ -118,7 +118,12 @@ namespace TrustTunnelGui
         {
             string line;
             int budget = 5000;
-            while (budget-- > 0 && _incoming.TryDequeue(out line)) HandleLine(line);
+            while (budget-- > 0 && _incoming.TryDequeue(out line))
+            {
+                // An exception here would stop the drain timer for good, and with it all client state tracking.
+                try { HandleLine(line); }
+                catch (Exception ex) { Log.Write("Client line handling failed: " + ex); }
+            }
         }
 
         public void ClearQueries()
@@ -244,6 +249,10 @@ namespace TrustTunnelGui
                 if (ConsoleCtrl.SendCtrlC(p.Id) && p.WaitForExit(timeoutMs)) return;
                 if (!p.HasExited) p.Kill();
                 p.WaitForExit(3000);
+            }
+            catch (InvalidOperationException)
+            {
+                // The client exited during the Ctrl+C wait and HandleExit has already disposed the Process.
             }
             catch (Exception ex)
             {

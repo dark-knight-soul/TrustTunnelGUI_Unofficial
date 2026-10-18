@@ -24,8 +24,8 @@ using WinForms = System.Windows.Forms;
 [assembly: AssemblyCompany("TrustTunnel GUI (unofficial)")]
 [assembly: AssemblyProduct("TrustTunnel GUI")]
 [assembly: AssemblyCopyright("Copyright © 2026 404. Apache License 2.0")]
-[assembly: AssemblyVersion("1.2.9.0")]
-[assembly: AssemblyFileVersion("1.2.9.0")]
+[assembly: AssemblyVersion("1.2.10.0")]
+[assembly: AssemblyFileVersion("1.2.10.0")]
 
 namespace TrustTunnelGui
 {
@@ -61,6 +61,8 @@ namespace TrustTunnelGui
         DispatcherTimer _recoveryTimer;
         DateTime _lastNetworkEvent = DateTime.MinValue;   // UTC
         DateTime _lastAutoRestart = DateTime.MinValue;    // UTC
+        DateTime? _loggedOfflineSince;                    // recovery episode already logged as waiting for the network
+        DateTime _loggedAdapterMissing = DateTime.MinValue; // UTC
         DispatcherTimer _updateTimer;
         bool _updateBusy;
         string _clientVersion;
@@ -270,7 +272,12 @@ namespace TrustTunnelGui
                 }));
             };
             _recoveryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-            _recoveryTimer.Tick += delegate { CheckStuckRecovery(); };
+            // An exception in a Tick handler stops a DispatcherTimer for good.
+            _recoveryTimer.Tick += delegate
+            {
+                try { CheckStuckRecovery(); }
+                catch (Exception ex) { Log.Write("Recovery check failed: " + ex); }
+            };
             _recoveryTimer.Start();
 
             Window = new MainWindow();
@@ -458,12 +465,20 @@ namespace TrustTunnelGui
             if (ReconnectChanged != null) ReconnectChanged();
         }
 
+        // A client that is still stopping cannot be started: the timer stays on and tries again on its next tick.
+        // Only the server that was connected is reconnected; if it was deleted, the wait ends.
         void ReconnectNow()
         {
+            var server = Store.Server(Vpn.ActiveServerId);
+            if (server == null)
+            {
+                CancelReconnect();
+                return;
+            }
+            if (Vpn.State != VpnState.Disconnected) return;
             StopReconnectTimer();
             if (ReconnectChanged != null) ReconnectChanged();
-            var server = Store.Server(Vpn.ActiveServerId) ?? SelectedServer;
-            if (server != null && Vpn.State == VpnState.Disconnected) Connect(server, true);
+            Connect(server, true);
         }
 
         // The client picks the outbound adapter and gateway when it starts and keeps using them: after a switch
@@ -496,18 +511,47 @@ namespace TrustTunnelGui
             else if (now - since.Value >= TimeSpan.FromSeconds(10) && _lastNetworkEvent >= since.Value - TimeSpan.FromMinutes(2)) reason = "No recovery after a network event";
             else return;
             if (now - _lastAutoRestart < TimeSpan.FromSeconds(30)) return;
-            if (Net.NetworkFingerprint().Length == 0) return; // offline: wait for the network
             var server = Store.Server(Vpn.ActiveServerId);
-            if (server != null) RestartClient(server, reason, L.NetworkRecovering);
+            if (server == null) return;
+            if (Net.NetworkFingerprint().Length > 0)
+            {
+                RestartClient(server, reason, L.NetworkRecovering);
+                return;
+            }
+            // No adapter has an IPv4 address and gateway. Keep the client and with it the kill switch: a client started
+            // now could not connect, and stopping it would let traffic out. Once the address is back (DHCP passes the kill
+            // switch through killswitch_allow_ports) the restart follows.
+            if (_loggedOfflineSince != since)
+            {
+                _loggedOfflineSince = since;
+                Log.Write(reason + ", but no adapter has an IPv4 address and gateway: waiting for the network");
+            }
         }
 
-        // Counted as a reconnect attempt: if the new client cannot connect yet, the usual back-off keeps trying.
+        // Counted as a reconnect attempt when auto-reconnect is on: if the new client cannot connect yet, the usual
+        // back-off keeps trying. With it off, a failed restart is reported like any failed connection.
         void RestartClient(ServerInfo server, string reason, string message)
         {
+            var settings = Store.Data.Settings;
+            var now = DateTime.UtcNow;
+            _lastAutoRestart = now;
+            // Connect() does not start a client without its chosen adapter. Keep the stuck one, whose kill switch still
+            // blocks traffic, rather than stop it while another adapter is online; a later check restarts it.
+            if (settings.TunAdapterMissing || settings.SocksAdapterMissing)
+            {
+                if (now - _loggedAdapterMissing >= TimeSpan.FromMinutes(10))
+                {
+                    _loggedAdapterMissing = now;
+                    Log.Write(reason + ", but the chosen adapter is unavailable: keeping the client until it is back");
+                    var notice = settings.TunAdapterMissing ? L.TunAdapterUnavailable : L.AdapterUnavailable;
+                    if (Window.IsVisible) Window.ShowSnack(notice);
+                    else _tray.Balloon(L.AppName, notice, true);
+                }
+                return;
+            }
             Log.Write(reason + ", restarting the client");
             if (Window.IsVisible) Window.ShowSnack(message);
-            _lastAutoRestart = DateTime.UtcNow;
-            if (_reconnectAttempt == 0) _reconnectAttempt = 1;
+            if (_reconnectAttempt == 0 && settings.AutoReconnect) _reconnectAttempt = 1;
             Connect(server, true);
         }
 
@@ -624,7 +668,7 @@ namespace TrustTunnelGui
 
         public void DeleteServer(ServerInfo server)
         {
-            if (Vpn.ActiveServerId == server.Id && Vpn.State != VpnState.Disconnected) Vpn.Disconnect();
+            if (Vpn.ActiveServerId == server.Id && (Vpn.IsBusy || IsReconnecting)) Disconnect();
             Store.Data.Servers.Remove(server);
             if (Store.Data.Settings.SelectedServerId == server.Id) Store.Data.Settings.SelectedServerId = "";
             Store.Save();
@@ -845,7 +889,10 @@ namespace TrustTunnelGui
             _on = MakeIcon(size, Color.FromArgb(0x4C, 0xAF, 0x50), false);
 
             _menu = new WinForms.ContextMenuStrip { ShowImageMargin = false, Font = new Font("Segoe UI", 9f) };
-            _menu.Opening += delegate { BuildMenu(); };
+            // Rebuilt on every opening. WinForms cancels opening an empty menu and places it by its size before Opening,
+            // so it is built once here as well: otherwise the first right-click shows nothing (or a misplaced menu).
+            _menu.Opening += delegate(object s, System.ComponentModel.CancelEventArgs e) { BuildMenu(); e.Cancel = false; };
+            BuildMenu();
             _icon = new WinForms.NotifyIcon { ContextMenuStrip = _menu, Visible = true };
             _icon.MouseClick += delegate(object s, WinForms.MouseEventArgs e)
             {
@@ -940,13 +987,16 @@ namespace TrustTunnelGui
             _menu.BackColor = TrayColors.Back;
             _menu.ForeColor = TrayColors.Fore;
             var vpn = _app.Vpn;
+            // Waiting to reconnect counts as active: the menu offers Disconnect, which also cancels the wait.
+            bool reconnecting = vpn.State == VpnState.Disconnected && _app.IsReconnecting;
             string status = vpn.State == VpnState.Connected ? L.Connected
                 : vpn.State == VpnState.Connecting ? L.Connecting
-                : vpn.State == VpnState.Disconnecting ? L.Disconnecting : L.Disconnected;
+                : vpn.State == VpnState.Disconnecting ? L.Disconnecting
+                : reconnecting ? L.Reconnecting : L.Disconnected;
             _menu.Items.Add(new WinForms.ToolStripMenuItem(string.Format(L.TrayStatus, status)) { Enabled = false });
 
             var selected = _app.SelectedServer;
-            if (vpn.State == VpnState.Disconnected)
+            if (vpn.State == VpnState.Disconnected && !reconnecting)
             {
                 var connect = new WinForms.ToolStripMenuItem(selected != null ? L.Connect + " (" + selected.Name + ")" : L.Connect) { Enabled = selected != null };
                 connect.Click += delegate { if (selected != null) _app.Connect(selected); };

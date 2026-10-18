@@ -280,6 +280,12 @@ namespace TrustTunnelGui
             Kv(sb, "loglevel", Str(settings.LogLevel == "debug" ? "debug" : "info"));
             Kv(sb, "vpn_mode", Str(profile.DefaultMode == "bypass" ? "selective" : "general"));
             Kv(sb, "killswitch_enabled", settings.KillSwitch ? "true" : "false");
+            // The kill switch has no exception for DHCP. Without one the adapter cannot renew its lease while connected,
+            // loses its address when the lease runs out (often during sleep), and the client never reconnects.
+            // 68 is the local port of the DHCP client. The client lets through any traffic on that local port, both ways
+            // and for any program; ordinary programs never use it. Written as an integer literal: the client silently
+            // ignores a quoted value.
+            if (settings.KillSwitch) Kv(sb, "killswitch_allow_ports", "[68]");
             Kv(sb, "post_quantum_group_enabled", settings.PostQuantum ? "true" : "false");
             Kv(sb, "exclusions", List(Exclusions(profile)));
             sb.AppendLine();

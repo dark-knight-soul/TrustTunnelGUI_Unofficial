@@ -1226,7 +1226,7 @@ namespace TrustTunnelGui
 
         void Apply(BackupFile file, Dictionary<string, string> passwords, bool replace)
         {
-            if (replace && App.I.Vpn.State != VpnState.Disconnected) App.I.Disconnect();
+            if (replace && (App.I.Vpn.IsBusy || App.I.IsReconnecting)) App.I.Disconnect();
             int count = Backup.Apply(App.I.Store.Data, file, passwords, replace);
             App.I.Store.Save();
             bool missingPasswords = file.Servers.Any(s => !passwords.ContainsKey(s.Id));

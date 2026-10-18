@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/badges/version.svg" alt="version 1.2.9">
+  <img src="docs/badges/version.svg" alt="version 1.2.10">
   <img src="docs/badges/windows.svg" alt="Windows 10 | 11">
   <img src="docs/badges/dotnet.svg" alt=".NET Framework 4.8">
   <img src="docs/badges/license.svg" alt="license Apache-2.0">
@@ -69,8 +69,8 @@
 
 | Вариант | Файл | Для чего |
 |---|---|---|
-| **Установщик** | `TrustTunnelGUI-1.2.9-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
-| **Portable** | `TrustTunnelGUI-1.2.9-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
+| **Установщик** | `TrustTunnelGUI-1.2.10-setup.exe` | Установка в `Program Files`, ярлыки, удаление через «Установленные приложения». Настройки — в `%APPDATA%\TrustTunnelGUI`. |
+| **Portable** | `TrustTunnelGUI-1.2.10-portable.zip` | Распаковать в любую папку и запустить `TrustTunnelGUI.exe`. Настройки и журналы — в папке `data` рядом с программой. |
 
 Нужна Windows 10 или 11 (x64); .NET Framework 4.8 уже входит в систему.
 
@@ -82,7 +82,7 @@
 Установщик поддерживает тихий режим для автоматизации:
 
 ```bat
-TrustTunnelGUI-1.2.9-setup.exe --silent
+TrustTunnelGUI-1.2.10-setup.exe --silent
 "C:\Program Files\TrustTunnel GUI\uninstall.exe" --uninstall --silent
 ```
 
@@ -221,10 +221,10 @@ scripts\build.cmd
 ```
 dist/
 ├── portable/
-│   ├── TrustTunnelGUI-1.2.9-portable/      готовая к запуску папка
-│   └── TrustTunnelGUI-1.2.9-portable.zip
+│   ├── TrustTunnelGUI-1.2.10-portable/      готовая к запуску папка
+│   └── TrustTunnelGUI-1.2.10-portable.zip
 └── installer/
-    └── TrustTunnelGUI-1.2.9-setup.exe
+    └── TrustTunnelGUI-1.2.10-setup.exe
 ```
 
 Отладочная сборка `scripts\build.cmd -Dev` создаёт `dist\dev\TrustTunnelGUI.dev.exe` с самотестами:
@@ -255,8 +255,8 @@ Workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) собир
   предупреждать, когда у сертификата накопится репутация. Без секретов шаг пропускается.
 
 ```bat
-git tag v1.2.9
-git push origin v1.2.9
+git tag v1.2.10
+git push origin v1.2.10
 ```
 
 ## Где хранятся данные
@@ -278,6 +278,17 @@ git push origin v1.2.9
 Откройте *Настройки → Журнал подключений*. Строки `WARN Failed to ping location` значат, что сервер недоступен
 по указанному адресу и порту. Строки `ERROR` обычно указывают на неверный логин, пароль или сертификат.
 Для подробного журнала включите *Настройки → Журналирование → Отладка* и переподключитесь.
+</details>
+
+<details>
+<summary><b>После сна или через пару часов пропадает интернет при включённом kill switch</b></summary>
+
+Kill switch клиента блокирует весь трафик мимо туннеля, в том числе DHCP. До версии 1.2.10 Windows из-за этого не могла
+продлить аренду IP-адреса, пока VPN подключён: когда аренда заканчивалась, адаптер оставался без адреса, а клиент — без связи
+с сервером. Начиная с 1.2.10 GUI добавляет в конфигурацию `killswitch_allow_ports = [68]`, и DHCP проходит.
+Учтите: клиент пропускает мимо kill switch любой трафик с локальным портом 68 (TCP и UDP, в обе стороны), а не только DHCP;
+обычные программы этот порт не используют. Локальная сеть идёт мимо VPN, только если её подсети есть в
+*Настройки → Исключённые маршруты*; пустой список направляет в туннель и её.
 </details>
 
 <details>
